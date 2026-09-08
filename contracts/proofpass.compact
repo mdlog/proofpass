@@ -1,0 +1,135 @@
+pragma language_version 0.23;
+
+import CompactStandardLibrary;
+
+// ProofPass — Wave 1 "proof of eligibility" (PRD §14).
+//
+// The boundaries follow ARCHITECTURE §8: an issuer registry, a vault that holds
+// commitments and never payloads, a revocation registry, and a proof policy that
+// checks issuer status, expiry, revocation and nonce freshness.
+//
+// Nothing personal is written here. The ledger only ever sees hashes: a
+// credential is a commitment over (issuer, expiry, holder secret), so proving
+// eligibility means proving knowledge of the secret behind a registered
+// commitment — never the attributes behind it.
+
+export enum IssuerStatus {
+  UNREGISTERED,
+  ACTIVE,
+  REVOKED
+}
+
+/** §8.1 CredentialRegistry — who may issue, and whether they still may. */
+export ledger issuers: Map<Bytes<32>, IssuerStatus>;
+
+/** §8.2 CredentialVault — commitments only. */
+export ledger credentials: Set<Bytes<32>>;
+
+/** §8.3 RevocationRegistry — a revoked credential never returns to active. */
+export ledger revokedCredentials: Set<Bytes<32>>;
+
+/** §11 replay mitigation — a presentation nonce is accepted exactly once. */
+export ledger spentNonces: Set<Bytes<32>>;
+
+/** Public, non-identifying counter for the activity feed (§13). */
+export ledger acceptedProofs: Counter;
+
+/** Whoever deployed the contract holds registry and revocation authority. */
+export ledger authority: Bytes<32>;
+
+/** The deployer's / holder's local secret. Never leaves the wallet. */
+witness localSecretKey(): Bytes<32>;
+
+constructor() {
+  authority = disclose(authorityKey(localSecretKey()));
+}
+
+export circuit authorityKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "proofpass:authority"), sk]);
+}
+
+/**
+ * A credential is bound to its issuer, its expiry and the holder's secret, so
+ * the same secret cannot be replayed against a different issuer or a longer
+ * validity than the one that was issued.
+ */
+export circuit credentialCommitment(issuerId: Bytes<32>, expiresAt: Uint<64>, sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([
+    pad(32, "proofpass:credential"),
+    issuerId,
+    expiresAt as Field as Bytes<32>,
+    sk
+  ]);
+}
+
+circuit assertAuthority(): [] {
+  assert(authority == disclose(authorityKey(localSecretKey())), "Caller is not the registry authority");
+}
+
+export circuit registerIssuer(issuerId: Bytes<32>): [] {
+  assertAuthority();
+  // ARCHITECTURE §6 classifies the issuer identifier as public: it is what
+  // verifiers look up for trust, so publishing it is the point.
+  const id = disclose(issuerId);
+  assert(!issuers.member(id), "Issuer is already registered");
+  issuers.insert(id, IssuerStatus.ACTIVE);
+}
+
+export circuit revokeIssuer(issuerId: Bytes<32>): [] {
+  assertAuthority();
+  const id = disclose(issuerId);
+  assert(issuers.member(id), "Issuer is not registered");
+  issuers.insert(id, IssuerStatus.REVOKED);
+}
+
+/**
+ * §8.2 invariant: only a registered, active issuer can add a commitment, and a
+ * commitment is never overwritten once it exists.
+ */
+export circuit issueCredential(issuerId: Bytes<32>, commitment: Bytes<32>): [] {
+  assertAuthority();
+  const id = disclose(issuerId);
+  // The commitment is the public verification metadata of ARCHITECTURE §6 — it
+  // stands in for the credential without revealing anything inside it.
+  const leaf = disclose(commitment);
+  assert(issuers.member(id), "Issuer is not registered");
+  assert(issuers.lookup(id) == IssuerStatus.ACTIVE, "Issuer may no longer issue credentials");
+  assert(!credentials.member(leaf), "Credential is already issued");
+  assert(!revokedCredentials.member(leaf), "Credential was revoked and cannot be reissued");
+  credentials.insert(leaf);
+}
+
+/** §8.3 invariant: revocation is one-way on the MVP path. */
+export circuit revokeCredential(commitment: Bytes<32>): [] {
+  assertAuthority();
+  const leaf = disclose(commitment);
+  assert(credentials.member(leaf), "Credential is not issued");
+  credentials.remove(leaf);
+  revokedCredentials.insert(leaf);
+}
+
+/**
+ * §8.4 ProofPolicy. The holder proves they know the secret behind a registered,
+ * unrevoked, unexpired credential from an active issuer — and the nonce makes
+ * the presentation single-use. No attribute of the credential is revealed.
+ */
+export circuit proveEligibility(issuerId: Bytes<32>, expiresAt: Uint<64>, nonce: Bytes<32>): [] {
+  // Issuer, expiry and nonce all belong to the presentation the verifier asked
+  // for, so they are disclosed deliberately. The holder's secret is not, and the
+  // commitment below is the only thing derived from it that reaches the ledger.
+  const id = disclose(issuerId);
+  const deadline = disclose(expiresAt);
+  const presentationNonce = disclose(nonce);
+
+  assert(issuers.member(id), "Issuer is not registered");
+  assert(issuers.lookup(id) == IssuerStatus.ACTIVE, "Issuer is not active");
+  assert(!spentNonces.member(presentationNonce), "This proof nonce was already used");
+  assert(kernel.blockTimeLessThan(deadline), "Credential has expired");
+
+  const commitment = disclose(credentialCommitment(id, deadline, localSecretKey()));
+  assert(credentials.member(commitment), "No such credential for this issuer and expiry");
+  assert(!revokedCredentials.member(commitment), "Credential has been revoked");
+
+  spentNonces.insert(presentationNonce);
+  acceptedProofs.increment(1);
+}

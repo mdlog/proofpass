@@ -1,0 +1,86 @@
+import { describe, expect, it } from "vitest";
+import { connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, type DetectedWallet } from "./midnightWallet";
+
+/**
+ * A stand-in for Lace 2.2.3. Its `connect` accepts exactly one network — the one
+ * the wallet is actually on — and rejects every other with the bare message Lace
+ * really sends, which never names the network it wants.
+ */
+function walletOn(activeNetwork: string) {
+  const attempts: string[] = [];
+  const wallet: DetectedWallet = {
+    id: "2d7e3c0e-0f97-49cb-9fb8-923e565ac15d",
+    name: "lace",
+    apiVersion: "4.0.1",
+    rdns: "io.lace.wallet",
+    connect: async (networkId: string) => {
+      attempts.push(networkId);
+      if (networkId !== activeNetwork) throw new Error("Network ID mismatch");
+      return {
+        getConnectionStatus: async () => ({ status: "connected", networkId: activeNetwork }),
+        getConfiguration: async () => ({ networkId: activeNetwork }),
+        getUnshieldedAddress: async () => ({ unshieldedAddress: `mn_addr_${activeNetwork}1wpjyvwfrh7mjhthx5jt08np3f9` }),
+      };
+    },
+  };
+  return { wallet, attempts };
+}
+
+/** A wallet whose owner clicked "reject" in the extension popup. */
+function rejectingWallet() {
+  const attempts: string[] = [];
+  const wallet: DetectedWallet = {
+    id: "lace",
+    name: "lace",
+    apiVersion: "4.0.1",
+    connect: async (networkId: string) => {
+      attempts.push(networkId);
+      throw new Error("Access to wallet api denied");
+    },
+  };
+  return { wallet, attempts };
+}
+
+describe("connectMidnightWallet", () => {
+  it("connects straight away when the requested network is the wallet's network", async () => {
+    const { wallet, attempts } = walletOn("preview");
+    const session = await connectMidnightWallet(wallet, "preview");
+    expect(session.network).toBe("preview");
+    expect(attempts).toEqual(["preview"]);
+  });
+
+  // ARCHITECTURE §18: an unexpected network is rejected, never resolved by
+  // quietly connecting somewhere the user did not ask for.
+  it("rejects a mismatch instead of trying another network", async () => {
+    const { wallet, attempts } = walletOn("preprod");
+    await expect(connectMidnightWallet(wallet, "preview")).rejects.toBeInstanceOf(WalletNetworkMismatchError);
+    expect(attempts).toEqual(["preview"]);
+  });
+
+  it("passes a declined request through untouched", async () => {
+    const { wallet, attempts } = rejectingWallet();
+    await expect(connectMidnightWallet(wallet, "preview")).rejects.toThrow(/denied/i);
+    expect(attempts).toEqual(["preview"]);
+  });
+});
+
+describe("discoverWalletNetwork", () => {
+  it("finds the network the wallet is actually on", async () => {
+    const { wallet, attempts } = walletOn("preprod");
+    const session = await discoverWalletNetwork(wallet, "preview");
+    expect(session.network).toBe("preprod");
+    expect(session.rawAddress).toContain("preprod");
+    expect(attempts).not.toContain("preview");
+  });
+
+  it("stops at a declined request rather than prompting for every network", async () => {
+    const { wallet, attempts } = rejectingWallet();
+    await expect(discoverWalletNetwork(wallet, "preview")).rejects.toThrow(/denied/i);
+    expect(attempts).toHaveLength(1);
+  });
+
+  it("reports the failure when no network answers", async () => {
+    const { wallet } = walletOn("something-else");
+    await expect(discoverWalletNetwork(wallet, "preview")).rejects.toThrow(/network id mismatch/i);
+  });
+});
