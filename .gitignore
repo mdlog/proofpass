@@ -113,6 +113,12 @@ temp/
 client/public/__manus__/version.json
 .project-config.json
 
-# Compact build output
-contracts/managed/
+# Compact build output. The generated contract module is committed (116 KB) so
+# the off-chain circuit tests run on a clean checkout without installing the
+# Compact toolchain. The proving/verifier keys and ZKIR are not (14 MB) — they
+# are only needed to submit a transaction, and `pnpm contracts:build` rebuilds
+# everything.
+contracts/managed/proofpass/keys/
+contracts/managed/proofpass/zkir/
+contracts/managed/proofpass/contract/index.js.map
 client/public/compact/

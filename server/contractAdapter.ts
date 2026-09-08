@@ -44,7 +44,11 @@ export async function getCompactArtifactStatus(): Promise<CompactArtifactStatus>
   const modulePath = configuredPath("MIDNIGHT_COMPACT_MODULE_PATH");
   const assetsPath = configuredPath("MIDNIGHT_COMPACT_ASSETS_PATH");
   const moduleAvailable = await pathExists(modulePath);
-  const assetsAvailable = await pathExists(assetsPath);
+  // The assets directory existing is not enough: `withCompiledFileAssets` binds
+  // the path lazily, so a tree with no compiled keys still reported "ready" and
+  // the UI showed a green badge over artifacts that could never prove anything.
+  // ARCHITECTURE §20 requires missing output to be an explicit unavailable state.
+  const assetsAvailable = await pathExists(assetsPath) && await pathExists(assetsPath ? `${assetsPath}/keys` : null);
   const configured = Boolean(modulePath && assetsPath);
   let detail = "Set MIDNIGHT_COMPACT_MODULE_PATH and MIDNIGHT_COMPACT_ASSETS_PATH to activate the generated Compact contract.";
   if (configured && moduleAvailable && assetsAvailable) detail = "Generated Compact module and compiled assets are ready for Midnight.js.";

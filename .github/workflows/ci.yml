@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The generated Compact module is committed, so the off-chain circuit
+      # tests run here without installing the Compact toolchain. Guard against
+      # it going missing: a silent skip would report green with no contract
+      # coverage at all.
+      - name: Contract artifact must be present
+        run: test -f contracts/managed/proofpass/contract/index.js
+
+      - run: pnpm check
+
+      - name: Test
+        run: pnpm test -- --reporter=verbose
+
+      # Every test must have run. `vitest run` exits 0 even when a whole file is
+      # skipped, which is exactly how the contract tests once disappeared.
+      - name: No test may be skipped
+        run: |
+          pnpm test 2>&1 | tee /tmp/vitest.log
+          if grep -qE '[0-9]+ skipped' /tmp/vitest.log; then
+            echo "::error::A test file or case was skipped; CI requires the full suite to run."
+            exit 1
+          fi
+
+      - run: pnpm build

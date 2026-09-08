@@ -15,4 +15,6 @@ export async function createContext(opts: trpcExpress.CreateExpressContextOption
   return { req: opts.req, res: opts.res, user };
 }
 
-export type Context = Awaited<ReturnType<typeof createContext>>;
+/** The tRPC context. `Context` is kept as an alias for local readability. */
+export type TrpcContext = Awaited<ReturnType<typeof createContext>>;
+export type Context = TrpcContext;

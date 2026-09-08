@@ -83,12 +83,37 @@ cp .env.example .env   # then fill in the values below
 ## Running
 
 ```bash
-pnpm dev     # tsx watch + Vite middleware
-pnpm build   # client to dist/public, server to dist/index.js
-pnpm start   # NODE_ENV=production node dist/index.js
-pnpm test    # vitest
-pnpm check   # tsc --noEmit
+pnpm dev            # tsx watch + Vite middleware
+pnpm build          # client to dist/public, server to dist/index.js
+pnpm start          # NODE_ENV=production node dist/index.js
+pnpm test           # vitest
+pnpm test:coverage  # vitest with v8 coverage
+pnpm check          # tsc --noEmit
 ```
+
+## Tests
+
+`pnpm test` runs 91 tests across 13 files and needs no database, network, or
+Compact toolchain — the generated contract module is committed, so the circuit
+tests run on a clean checkout.
+
+| Area | Where | What it covers |
+|---|---|---|
+| Compact circuits | `contracts/proofpass.contract.test.ts` | The six ARCHITECTURE §14 unit bullets, simulated off-chain through `@midnight-ntwrk/compact-runtime`: issuer allow-list, revocation authority, one-way status transition, block-time expiry, nonce replay, and that the holder's secret never leaves the private transcript. |
+| Proof-request lifecycle | `server/routers.test.ts` | The real tRPC router against an in-memory store: auth gate, zod contracts, request → approve → verification, and the holder-only/pending-only rule. |
+| Wallet negotiation | `client/src/lib/midnightWallet.test.ts` | Strict connect, explicit network discovery, declined requests. |
+| Derived state | `client/src/lib/{types,activity}.test.ts` | Expiry derivation, fact labels, and the activity trail growing when a request is answered. |
+| Dialogs | `client/src/components/*.test.tsx` | Consent disclosure, decline flow, validation, focus trap, Escape. |
+| Shell | `client/src/pages/Home.test.tsx` | One `h1` per page, keyboard-only navigation, mobile drawer, toast feedback. |
+| Motion | `client/src/styles.test.ts` | `prefers-reduced-motion` neutralises animation globally and in the consent sequence. |
+
+CI (`.github/workflows/ci.yml`) runs `pnpm check`, the suite, and the build, and
+**fails if any test is skipped** — a skipped file once hid the fact that no
+contract test was running at all.
+
+Not covered: `server/db.ts` at the SQL level (it would require a live MySQL and
+would cost the suite its hermeticity), and the eight-step demo script in
+`docs/DEMO.md`, which is still run by hand.
 
 Under a process manager:
 

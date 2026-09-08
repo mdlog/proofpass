@@ -127,8 +127,12 @@ export circuit proveEligibility(issuerId: Bytes<32>, expiresAt: Uint<64>, nonce:
   assert(kernel.blockTimeLessThan(deadline), "Credential has expired");
 
   const commitment = disclose(credentialCommitment(id, deadline, localSecretKey()));
-  assert(credentials.member(commitment), "No such credential for this issuer and expiry");
+  // Revocation is checked first on purpose: revokeCredential removes the
+  // commitment from `credentials`, so a membership check placed ahead of this
+  // one would always fire first and a revoked holder would be told the
+  // credential never existed.
   assert(!revokedCredentials.member(commitment), "Credential has been revoked");
+  assert(credentials.member(commitment), "No such credential for this issuer and expiry");
 
   spentNonces.insert(presentationNonce);
   acceptedProofs.increment(1);

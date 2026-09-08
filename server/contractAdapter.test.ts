@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getCompactArtifactStatus, validateCompiledContract } from "./contractAdapter";
 
@@ -44,5 +46,37 @@ describe("contractAdapter", () => {
     expect(status.moduleAvailable).toBe(false);
     expect(status.assetsAvailable).toBe(false);
     await expect(validateCompiledContract()).rejects.toThrow("not readable");
+  });
+});
+
+describe("contractAdapter with the real generated artifacts", () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  const modulePath = path.join(root, "contracts/managed/proofpass/contract/index.js");
+  const assetsPath = path.join(root, "contracts/managed/proofpass");
+  const keysPresent = existsSync(path.join(assetsPath, "keys"));
+
+  beforeEach(() => {
+    process.env.MIDNIGHT_COMPACT_MODULE_PATH = modulePath;
+    process.env.MIDNIGHT_COMPACT_ASSETS_PATH = assetsPath;
+    process.env.MIDNIGHT_COMPACT_CONTRACT_TAG = "proofpass";
+  });
+
+  it("reports the generated module as present", async () => {
+    const status = await getCompactArtifactStatus();
+    expect(status).toMatchObject({ configured: true, moduleAvailable: true, contractTag: "proofpass" });
+  });
+
+  // The proving keys are build output and stay out of version control, so this
+  // asserts whichever state the working tree is actually in — and that the two
+  // states disagree, which is the point of the check.
+  it("ties asset availability to the compiled keys, not just the directory", async () => {
+    const status = await getCompactArtifactStatus();
+    expect(status.assetsAvailable).toBe(keysPresent);
+    expect(status.detail).toMatch(keysPresent ? /ready for Midnight\.js/ : /not readable/);
+  });
+
+  it("builds a real CompiledContract from the generated module", async () => {
+    const result = await validateCompiledContract();
+    expect(result).toMatchObject({ contractTag: "proofpass", compiledContractReady: true });
   });
 });
