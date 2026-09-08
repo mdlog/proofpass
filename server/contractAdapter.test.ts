@@ -75,8 +75,18 @@ describe("contractAdapter with the real generated artifacts", () => {
     expect(status.detail).toMatch(keysPresent ? /ready for Midnight\.js/ : /not readable/);
   });
 
-  it("builds a real CompiledContract from the generated module", async () => {
-    const result = await validateCompiledContract();
-    expect(result).toMatchObject({ contractTag: "proofpass", compiledContractReady: true });
-  });
+  it(
+    keysPresent
+      ? "builds a real CompiledContract from the generated module"
+      : "refuses to build without the compiled keys instead of reporting ready",
+    async () => {
+      if (keysPresent) {
+        await expect(validateCompiledContract()).resolves.toMatchObject({ contractTag: "proofpass", compiledContractReady: true });
+      } else {
+        // ARCHITECTURE §20: missing generated output is an explicit unavailable
+        // state, never something the app can present as a working contract.
+        await expect(validateCompiledContract()).rejects.toThrow(/not readable/);
+      }
+    },
+  );
 });
