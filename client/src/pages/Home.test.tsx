@@ -55,6 +55,25 @@ function renderApp() {
 const heading = () => screen.getByRole("heading", { level: 1 }).textContent ?? "";
 
 describe("workspace navigation", () => {
+  /**
+   * The breadcrumb was hardcoded to "Overview", so every page claimed to be a
+   * page it was not — the one piece of chrome whose whole job is saying where
+   * you are.
+   */
+  it("names the page you are actually on", async () => {
+    const user = renderApp();
+    const breadcrumb = () => screen.getByRole("navigation", { name: "Breadcrumb" }).textContent ?? "";
+    expect(breadcrumb()).toContain("Overview");
+    for (const [label, expected] of [
+      ["Activity", "Activity"],
+      ["Issuer workspace", "Issuer workspace"],
+      ["On-chain workflow", "On-chain workflow"],
+    ] as const) {
+      await user.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }));
+      expect(breadcrumb()).toContain(expected);
+    }
+  });
+
   it("gives every page exactly one h1 (PRD §11)", async () => {
     const user = renderApp();
     for (const [label, expected] of [
