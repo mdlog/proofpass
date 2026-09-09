@@ -43,6 +43,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, isStaleProviderError, WalletNetworkMismatchError, WalletStaleError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import { createCompactContractRequest, describeCompactIntegration, getDefaultCompactArtifactManifest, loadCompactArtifact } from "../lib/midnightContract";
 import { describeError, readableMessage } from "../lib/describeError";
+import { issuerForContract, rememberDeployedContract } from "../lib/deployedContract";
 import { deployProofPass } from "../lib/proofpassDeploy";
 import { trpc } from "../lib/trpc";
 import { ApprovalModal } from "../components/ApprovalModal";
@@ -382,6 +383,7 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const contractStatusQuery = trpc.contract.artifactStatus.useQuery(undefined, { enabled: isAuthenticated, retry: false });
   const saveWalletConnection = trpc.wallet.saveConnection.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
   const createIssuerMutation = trpc.issuer.create.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
+  const attachContractMutation = trpc.issuer.attachContract.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const createProofRequest = trpc.proofRequests.create.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
   const approveProofRequest = trpc.proofRequests.approve.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
@@ -566,17 +568,44 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
    * endpoint comes from the wallet, and the authority secret never leaves the
    * browser — only its hash reaches the ledger.
    */
+  /**
+   * The registry is where a deployed address outlives the browser, but writing
+   * to it needs an authenticated account and an issuer on the same network, and
+   * neither is guaranteed at deploy time. Every outcome says where the address
+   * ended up rather than leaving the operator to guess.
+   */
+  const recordContractAgainstIssuer = async (result: { contractAddress: string; networkId: string }) => {
+    if (!isAuthenticated) {
+      toast("Contract address kept in this browser only", { description: "Sign in and register an issuer to record it in the registry." });
+      return;
+    }
+    const issuer = issuerForContract(registryQuery.data?.issuers ?? [], result.networkId);
+    if (!issuer) {
+      toast("No issuer to attach the contract to", { description: `Register an issuer on ${result.networkId}, then attach ${result.contractAddress}.` });
+      return;
+    }
+    try {
+      await attachContractMutation.mutateAsync({ issuerId: issuer.id, contractAddress: result.contractAddress });
+      toast.success("Contract recorded in the registry", { description: `${issuer.displayName} now points at ${result.contractAddress}.` });
+    } catch (error) {
+      toast.error("Could not record the contract", { description: readableMessage(error) });
+    }
+  };
+
   const deployContract = async () => {
     if (!walletSession) { openWalletPicker(); return; }
     setDeployingContract(true);
     try {
       const result = await deployProofPass(walletSession.connected as never);
+      // Before anything else can fail: at this instant it is the only copy.
+      rememberDeployedContract(result);
       toast.success("Contract deployed", { description: `${result.contractAddress} on ${result.networkId}` });
       if (result.authority.source === "generated") {
         // Losing this means the registry can never be administered again.
         toast("Back up the registry authority", { description: `Authority seed: ${result.authority.hex}`, duration: 60_000 });
       }
       console.info("[ProofPass] deployed", result);
+      await recordContractAgainstIssuer(result);
     } catch (error) {
       const described = describeError(error);
       toast.error("Deployment failed", { description: readableMessage(error) });
