@@ -109,6 +109,17 @@ export class ReportingZkConfigProvider extends FetchZkConfigProvider<string> {
   /** The first read that failed, phrased for an operator. */
   firstFailure?: string;
 
+  /**
+   * The provider calls its fetch as `this.fetchFunc(...)`, and cross-fetch's
+   * default is `window.fetch` unbound — so the browser sees `this` as the
+   * provider and refuses with "Failed to execute 'fetch' on 'Window': Illegal
+   * invocation". Node's fetch ignores `this`, which is why only a browser ever
+   * hit it. Calling the host's fetch plainly, at call time, sidesteps both.
+   */
+  constructor(baseURL: string, fetchFunc: typeof fetch = (input, init) => fetch(input, init)) {
+    super(baseURL, fetchFunc);
+  }
+
   private async keepReason<T>(asset: string, circuitId: string, read: () => Promise<T>): Promise<T> {
     try {
       return await read();

@@ -202,3 +202,51 @@ describe("buildMidnightProviders wallet capabilities", () => {
     await expect(buildMidnightProviders(api)).rejects.toThrow(/reached getConfiguration/);
   });
 });
+
+/**
+ * `FetchZkConfigProvider` defaults to cross-fetch, which in a browser hands over
+ * `window.fetch` unbound, and then calls it as `this.fetchFunc(...)` — so `this`
+ * is the provider instead of the window and the browser refuses:
+ * "Failed to execute 'fetch' on 'Window': Illegal invocation". Node's fetch does
+ * not care about `this`, so only a browser ever saw it. These stand in for one.
+ */
+describe("ReportingZkConfigProvider fetch binding", () => {
+  // Port 9 (discard) so a real request cannot quietly succeed instead.
+  const UNREACHABLE = "http://127.0.0.1:9/compact/proofpass";
+
+  function withGlobalFetch<T>(stub: typeof fetch, body: () => T): T {
+    const original = globalThis.fetch;
+    globalThis.fetch = stub;
+    try {
+      return body();
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  const respond = (bytes: number[]) => async () => new Response(Uint8Array.from(bytes), { status: 200, headers: { "content-type": "application/octet-stream" } });
+
+  it("goes through the host's current fetch rather than one captured at import", async () => {
+    const key = await withGlobalFetch(respond([7, 8, 9]) as unknown as typeof fetch, () =>
+      new ReportingZkConfigProvider(UNREACHABLE).getVerifierKey("registerIssuer"));
+    expect([...key]).toEqual([7, 8, 9]);
+  });
+
+  it("never passes itself as `this`, which is what a browser rejects", async () => {
+    const browserLikeFetch = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      }
+      return Promise.resolve(new Response(Uint8Array.from([1]), { status: 200 }));
+    } as unknown as typeof fetch;
+
+    const key = await withGlobalFetch(browserLikeFetch, () =>
+      new ReportingZkConfigProvider(UNREACHABLE).getProverKey("issueCredential"));
+    expect([...key]).toEqual([1]);
+  });
+
+  it("still lets a caller inject its own fetch, which the other tests rely on", async () => {
+    const provider = new ReportingZkConfigProvider(UNREACHABLE, respond([4, 2]) as unknown as typeof fetch);
+    expect([...(await provider.getZKIR("proveEligibility"))]).toEqual([4, 2]);
+  });
+});
