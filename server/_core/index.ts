@@ -4,6 +4,7 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { appRouter } from "../routers";
+import { allowZkAssetOrigin } from "../zkAssets";
 import { createContext } from "./context";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -28,6 +29,10 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
 
+  // Before anything serves them: the wallet fetches the compiled ZK assets from
+  // its own extension origin, so they need a cross-origin header in dev and
+  // production alike.
+  app.use(allowZkAssetOrigin);
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
