@@ -130,3 +130,60 @@ describe("toast feedback (ARCHITECTURE §14)", () => {
     expect(await screen.findByText(/your issuer invite link will appear here/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * PRD §5 "Honest demo" and ADR-003. These are regressions with teeth: the app
+ * used to greet a signed-out visitor with "Wallet connected", a registry of
+ * "124 credentials issued", and a full page of credentials with nothing marking
+ * any of it as fabricated.
+ */
+describe("honest demo (PRD §5, ADR-003)", () => {
+  const demoTagsIn = (root: HTMLElement | Document = document) => root.querySelectorAll(".demo-tag").length;
+
+  it("does not claim a wallet connection there is none of", async () => {
+    renderApp();
+    expect(await screen.findByText(/no wallet connected/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^wallet connected$/i)).not.toBeInTheDocument();
+  });
+
+  it("says who is signed in, and admits when nobody is", async () => {
+    renderApp();
+    expect(await screen.findByText(/not signed in/i)).toBeInTheDocument();
+    expect(screen.queryByText("Alex Chen")).not.toBeInTheDocument();
+  });
+
+  it("shows no sidebar badge when there is no real count behind it", () => {
+    renderApp();
+    expect(document.querySelectorAll(".nav-count")).toHaveLength(0);
+  });
+
+  it("marks the invented figures on the overview", async () => {
+    renderApp();
+    await screen.findByText(/no wallet connected/i);
+    // Privacy score, the three metric cards, and the block number.
+    expect(demoTagsIn()).toBeGreaterThanOrEqual(5);
+  });
+
+  it("marks every seeded credential", async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Credentials/ }));
+    const cards = document.querySelectorAll(".credential-card");
+    expect(cards.length).toBeGreaterThan(0);
+    cards.forEach(card => expect(card.querySelector(".demo-tag")).not.toBeNull());
+  });
+
+  it("reports unknown registry numbers as unknown, never as invented ones", async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Issuer workspace/ }));
+    const registry = document.querySelector(".role-control-list")!;
+    expect(registry.textContent).not.toMatch(/118|124/);
+    expect(registry.textContent).toContain("—");
+    expect(document.querySelector(".role-hero-stat")!.textContent).toContain("—");
+  });
+
+  it("marks the seeded policy builder and registry events", async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Verifier workspace/ }));
+    expect(document.querySelector(".policy-builder .demo-tag")).not.toBeNull();
+  });
+});

@@ -45,6 +45,7 @@ import { createCompactContractRequest, describeCompactIntegration, getDefaultCom
 import { trpc } from "../lib/trpc";
 import { ApprovalModal } from "../components/ApprovalModal";
 import { CreateRequestModal } from "../components/CreateRequestModal";
+import { DemoTag } from "../components/DemoTag";
 import { RequestRow } from "../components/ProofRequestCard";
 import { StatusPill } from "../components/StatusBadge";
 import { toActivityItems, type ActivityItem } from "../lib/activity";
@@ -55,13 +56,12 @@ type NavItem = {
   id: Workspace;
   label: string;
   icon: LucideIcon;
-  count?: number;
 };
 
 const navItems: NavItem[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "credentials", label: "Credentials", icon: BadgeCheck, count: 4 },
-  { id: "requests", label: "Proof requests", icon: FileCheck2, count: 2 },
+  { id: "credentials", label: "Credentials", icon: BadgeCheck },
+  { id: "requests", label: "Proof requests", icon: FileCheck2 },
   { id: "activity", label: "Activity", icon: Activity },
   { id: "settings", label: "Settings", icon: Settings2 },
 ];
@@ -146,7 +146,13 @@ function SectionHeader({ eyebrow, title, description, action }: { eyebrow: strin
   );
 }
 
-function Sidebar({ workspace, onWorkspaceChange, onClose }: { workspace: Workspace; onWorkspaceChange: (workspace: Workspace) => void; onClose?: () => void }) {
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts.length === 1 ? parts[0].slice(0, 2) : parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function Sidebar({ workspace, onWorkspaceChange, onClose, accountName, counts }: { workspace: Workspace; onWorkspaceChange: (workspace: Workspace) => void; onClose?: () => void; accountName: string | null; counts: Partial<Record<Workspace, number>> }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
@@ -161,8 +167,8 @@ function Sidebar({ workspace, onWorkspaceChange, onClose }: { workspace: Workspa
       </div>
 
       <div className="workspace-switcher">
-        <div className="workspace-avatar">AC</div>
-        <div className="workspace-copy"><span>Personal workspace</span><strong>Alex Chen</strong></div>
+        <div className="workspace-avatar">{accountName ? initials(accountName) : "?"}</div>
+        <div className="workspace-copy"><span>Personal workspace</span><strong>{accountName ?? "Not signed in"}</strong></div>
         <ChevronDown size={15} className="muted-icon" />
       </div>
 
@@ -176,7 +182,7 @@ function Sidebar({ workspace, onWorkspaceChange, onClose }: { workspace: Workspa
               <button key={item.id} className={`nav-item ${active ? "nav-item-active" : ""}`} onClick={() => { onWorkspaceChange(item.id); onClose?.(); }}>
                 <Icon size={18} strokeWidth={active ? 2.2 : 1.8} />
                 <span>{item.label}</span>
-                {item.count && <span className="nav-count">{item.count}</span>}
+                {counts[item.id] !== undefined && <span className="nav-count">{counts[item.id]}</span>}
               </button>
             );
           })}
@@ -220,23 +226,23 @@ function Topbar({ onOpenMenu, onSearch, walletSession, walletCount, onConnect }:
   );
 }
 
-function Overview({ onWorkspaceChange, onApprove, requests, activity }: { onWorkspaceChange: (workspace: Workspace) => void; onApprove: (id: string) => void; requests: ProofRequestView[]; activity: ActivityItem[] }) {
+function Overview({ onWorkspaceChange, onApprove, requests, activity, walletSession }: { onWorkspaceChange: (workspace: Workspace) => void; onApprove: (id: string) => void; requests: ProofRequestView[]; activity: ActivityItem[]; walletSession: MidnightWalletSession | null }) {
   return (
     <div className="page-content page-overview">
       <div className="hero-grid">
         <section className="welcome-panel animate-in">
           <div className="grid-pattern" />
           <div className="welcome-copy">
-            <div className="hero-kicker"><span className="live-dot" />Wallet connected <span className="hero-separator">/</span> {getNetworkLabel()}</div>
+            <div className="hero-kicker"><span className={`live-dot ${walletSession ? "" : "live-dot-idle"}`} />{walletSession ? "Wallet connected" : "No wallet connected"} <span className="hero-separator">/</span> {walletSession ? getNetworkLabel(walletSession.network) : "Demo mode"}</div>
             <h1>Proofs, not paperwork.</h1>
             <p>Share exactly what’s needed to verify your credentials. Keep everything else private.</p>
             <button className="button button-light" onClick={() => onWorkspaceChange("requests")}>Review proof requests <ArrowUpRight size={16} /></button>
           </div>
           <div className="hero-orbit" aria-hidden="true"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core"><Fingerprint size={26} /></div><span className="orbit-node node-one" /><span className="orbit-node node-two" /><span className="orbit-node node-three" /></div>
-          <div className="hero-footnote"><span>Private state enabled</span><span className="hero-chain">Block 18,420,991 <ChevronRight size={13} /></span></div>
+          <div className="hero-footnote"><span>Private state enabled</span><span className="hero-chain">Block 18,420,991 <DemoTag /> <ChevronRight size={13} /></span></div>
         </section>
         <section className="privacy-score-card animate-in delay-1">
-          <div className="card-topline"><span className="eyebrow">Privacy score</span><CircleHelp size={16} className="muted-icon" /></div>
+          <div className="card-topline"><span className="eyebrow">Privacy score</span><DemoTag /><CircleHelp size={16} className="muted-icon" /></div>
           <div className="score-row"><div className="score-number">92<span>/100</span></div><div className="score-change"><ArrowUpRight size={14} /> +4.6%</div></div>
           <div className="score-meter"><span style={{ width: "92%" }} /></div>
           <p className="score-description">Excellent. Your credentials are shared with the minimum required disclosure.</p>
@@ -245,9 +251,9 @@ function Overview({ onWorkspaceChange, onApprove, requests, activity }: { onWork
       </div>
 
       <div className="metric-grid">
-        <MetricCard icon={BadgeCheck} label="Active credentials" value="3" detail="of 4 total" accent="teal" onClick={() => onWorkspaceChange("credentials")} />
-        <MetricCard icon={ClipboardCheck} label="Proofs shared" value="18" detail="this month" accent="coral" trend="+12.4%" />
-        <MetricCard icon={LockKeyhole} label="Data kept private" value="86%" detail="vs. full document share" accent="violet" trend="+8.1%" />
+        <MetricCard icon={BadgeCheck} label="Active credentials" value="3" detail="of 4 total" accent="teal" demo onClick={() => onWorkspaceChange("credentials")} />
+        <MetricCard icon={ClipboardCheck} label="Proofs shared" value="18" detail="this month" accent="coral" trend="+12.4%" demo />
+        <MetricCard icon={LockKeyhole} label="Data kept private" value="86%" detail="vs. full document share" accent="violet" trend="+8.1%" demo />
       </div>
 
       <div className="content-grid">
@@ -268,8 +274,8 @@ function Overview({ onWorkspaceChange, onApprove, requests, activity }: { onWork
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail, accent, trend, onClick }: { icon: LucideIcon; label: string; value: string; detail: string; accent: string; trend?: string; onClick?: () => void }) {
-  return <button className={`metric-card metric-${accent}`} onClick={onClick}><div className="metric-icon"><Icon size={18} /></div><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className="metric-detail">{trend && <span className="metric-trend"><ArrowUpRight size={12} />{trend}</span>} {detail}</div></button>;
+function MetricCard({ icon: Icon, label, value, detail, accent, trend, onClick, demo = false }: { icon: LucideIcon; label: string; value: string; detail: string; accent: string; trend?: string; onClick?: () => void; demo?: boolean }) {
+  return <button className={`metric-card metric-${accent}`} onClick={onClick}><div className="metric-icon"><Icon size={18} /></div><div className="metric-label">{label}{demo && <DemoTag />}</div><div className="metric-value">{value}</div><div className="metric-detail">{trend && <span className="metric-trend"><ArrowUpRight size={12} />{trend}</span>} {detail}</div></button>;
 }
 
 function ActivityRow({ item }: { item: ActivityItem }) {
@@ -281,7 +287,7 @@ function Credentials({ onAdd }: { onAdd: () => void }) {
   const [filter, setFilter] = useState<CredentialStatus | "All">("All");
   const filtered = useMemo(() => filter === "All" ? credentials : credentials.filter((credential) => credential.status === filter), [filter]);
   return <div className="page-content"><SectionHeader eyebrow="Your credentials" title="Credentials" description="A private collection of verifiable facts, held by you." action={<button className="button button-primary" onClick={onAdd}><Plus size={16} /> Receive credential</button>} />
-    <div className="toolbar"><div className="segmented-control">{(["All", "Active", "Expiring soon", "Revoked"] as const).map((item) => <button key={item} className={filter === item ? "segment-active" : ""} onClick={() => setFilter(item)}>{item}{item === "All" && <span>4</span>}</button>)}</div><button className="filter-button" onClick={() => toast("Credential filters", { description: "Sort and issuer filters are coming soon." })}><SlidersIcon /> Filter <ChevronDown size={14} /></button></div>
+    <div className="toolbar"><div className="segmented-control">{(["All", "Active", "Expiring soon", "Revoked"] as const).map((item) => <button key={item} className={filter === item ? "segment-active" : ""} onClick={() => setFilter(item)}>{item}{item === "All" && <span>{credentials.length}</span>}</button>)}</div><button className="filter-button" onClick={() => toast("Credential filters", { description: "Sort and issuer filters are coming soon." })}><SlidersIcon /> Filter <ChevronDown size={14} /></button></div>
     <div className="credential-grid">{filtered.map((credential, index) => <CredentialCard key={credential.id} credential={credential} index={index} onClick={() => toast(credential.title, { description: `${credential.issuer} · ${credential.status}` })} />)}</div>
   </div>;
 }
@@ -289,7 +295,7 @@ function Credentials({ onAdd }: { onAdd: () => void }) {
 function SlidersIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>; }
 
 function CredentialCard({ credential, index, onClick }: { credential: typeof credentials[number]; index: number; onClick: () => void }) {
-  return <button className={`credential-card accent-${credential.accent} animate-in`} style={{ animationDelay: `${index * 50}ms` }} onClick={onClick}><div className="credential-card-top"><div className="issuer-mark">{credential.mark}</div><StatusPill status={credential.status} /><MoreHorizontal size={18} className="credential-more" /></div><div className="credential-card-content"><p className="credential-type">VERIFIABLE CREDENTIAL</p><h2>{credential.title}</h2><p className="credential-issuer">Issued by <strong>{credential.issuer}</strong></p></div><div className="credential-card-footer"><span>Issued {credential.issued}</span><span>Valid until {credential.expires}</span><ChevronRight size={16} /></div><div className="card-watermark"><Fingerprint size={96} /></div></button>;
+  return <button className={`credential-card accent-${credential.accent} animate-in`} style={{ animationDelay: `${index * 50}ms` }} onClick={onClick}><div className="credential-card-top"><div className="issuer-mark">{credential.mark}</div><StatusPill status={credential.status} /><DemoTag /><MoreHorizontal size={18} className="credential-more" /></div><div className="credential-card-content"><p className="credential-type">VERIFIABLE CREDENTIAL</p><h2>{credential.title}</h2><p className="credential-issuer">Issued by <strong>{credential.issuer}</strong></p></div><div className="credential-card-footer"><span>Issued {credential.issued}</span><span>Valid until {credential.expires}</span><ChevronRight size={16} /></div><div className="card-watermark"><Fingerprint size={96} /></div></button>;
 }
 
 function ProofRequests({ onApprove, requests, onCreate }: { onApprove: (id: string) => void; requests: ProofRequestView[]; onCreate: () => void }) {
@@ -303,7 +309,7 @@ function ProofRequests({ onApprove, requests, onCreate }: { onApprove: (id: stri
 }
 
 function ActivityPage({ activity }: { activity: ActivityItem[] }) {
-  return <div className="page-content"><SectionHeader eyebrow="Audit trail" title="Activity" description="A lightweight trail of what was requested, shared, and verified." action={<button className="filter-button" onClick={() => toast("Export activity", { description: "Export is available in the production workspace." })}><ArrowDownRight size={15} /> Export</button>} /><div className="activity-summary"><div><span className="eyebrow">Proofs shared</span><strong>18</strong><p><span className="positive-text">+12.4%</span> from last month</p></div><div className="summary-visual"><span style={{ height: "38%" }} /><span style={{ height: "54%" }} /><span style={{ height: "42%" }} /><span style={{ height: "68%" }} /><span style={{ height: "55%" }} /><span style={{ height: "84%" }} /><span style={{ height: "74%" }} /><span style={{ height: "100%" }} /></div><div className="summary-legend"><span><i className="legend-teal" /> Approved</span><span><i className="legend-coral" /> Requests</span></div></div><div className="activity-table"><div className="table-head"><span>Event</span><span>Context</span><span>Timestamp</span><span>Status</span></div>{activity.map((item, index) => { const Icon = item.icon; return <div className="table-row" key={`${item.title}-${index}`}><div className="table-event"><div className={`activity-icon activity-${item.type}`}><Icon size={15} /></div><strong>{item.title}</strong>{item.seeded && <span className="demo-tag" title="Seeded demo data — not stored">Demo</span>}</div><span>{item.detail.split(" · ")[0]}</span><span>{item.time}</span><StatusPill status={item.type === "revoked" ? "Revoked" : item.type === "approved" ? "Approved" : "Pending"} /></div>; })}</div></div>;
+  return <div className="page-content"><SectionHeader eyebrow="Audit trail" title="Activity" description="A lightweight trail of what was requested, shared, and verified." action={<button className="filter-button" onClick={() => toast("Export activity", { description: "Export is available in the production workspace." })}><ArrowDownRight size={15} /> Export</button>} /><div className="activity-summary"><div><span className="eyebrow">Proofs shared <DemoTag /></span><strong>18</strong><p><span className="positive-text">+12.4%</span> from last month</p></div><div className="summary-visual"><span style={{ height: "38%" }} /><span style={{ height: "54%" }} /><span style={{ height: "42%" }} /><span style={{ height: "68%" }} /><span style={{ height: "55%" }} /><span style={{ height: "84%" }} /><span style={{ height: "74%" }} /><span style={{ height: "100%" }} /></div><div className="summary-legend"><span><i className="legend-teal" /> Approved</span><span><i className="legend-coral" /> Requests</span></div></div><div className="activity-table"><div className="table-head"><span>Event</span><span>Context</span><span>Timestamp</span><span>Status</span></div>{activity.map((item, index) => { const Icon = item.icon; return <div className="table-row" key={`${item.title}-${index}`}><div className="table-event"><div className={`activity-icon activity-${item.type}`}><Icon size={15} /></div><strong>{item.title}</strong>{item.seeded && <span className="demo-tag" title="Seeded demo data — not stored">Demo</span>}</div><span>{item.detail.split(" · ")[0]}</span><span>{item.time}</span><StatusPill status={item.type === "revoked" ? "Revoked" : item.type === "approved" ? "Approved" : "Pending"} /></div>; })}</div></div>;
 }
 
 function Settings() {
@@ -316,7 +322,11 @@ function SettingToggle({ title, description, checked, onChange, locked = false }
   return <div className="setting-row"><div><strong>{title}</strong><p>{description}</p></div><button className={`toggle ${checked ? "toggle-on" : ""} ${locked ? "toggle-locked" : ""}`} aria-pressed={checked} aria-label={`${title}: ${checked ? "on" : "off"}`} onClick={() => !locked && onChange(!checked)}>{checked && <Check size={13} />}</button></div>;
 }
 
-function IssuerWorkspace({ walletSession, onConnect, onRegisterIssuer, credentialCount, activeCredentialCount, revokedCount, artifactReady }: { walletSession: MidnightWalletSession | null; onConnect: () => void; onRegisterIssuer: () => void; credentialCount?: number; activeCredentialCount?: number; revokedCount?: number; artifactReady?: boolean }) {
+function IssuerWorkspace({ walletSession, onConnect, onRegisterIssuer, credentialCount, activeCredentialCount, revokedCount, expiringCount, artifactReady }: { walletSession: MidnightWalletSession | null; onConnect: () => void; onRegisterIssuer: () => void; credentialCount?: number; activeCredentialCount?: number; revokedCount?: number; expiringCount?: number; artifactReady?: boolean }) {
+  // These used to fall back to 124 / 118 / 2, which meant a visitor with no
+  // session — a judge opening the link — was shown a fabricated registry as if
+  // it were real. An unknown count is now shown as unknown.
+  const count = (value?: number) => value === undefined ? "—" : String(value);
   const artifactState = describeCompactIntegration();
   const prepareIssue = async () => {
     if (!walletSession) {
@@ -337,11 +347,11 @@ function IssuerWorkspace({ walletSession, onConnect, onRegisterIssuer, credentia
     }
   };
   const artifactIsReady = artifactReady || artifactState.configured;
-  return <div className="page-content role-page"><SectionHeader eyebrow="Issuer workspace" title="Issue with confidence." description="Create, manage, and revoke credentials without exposing holder data." action={<button className="button button-primary" onClick={prepareIssue}><Plus size={16} /> Issue credential</button>} /><div className="role-hero role-issuer"><div><div className="hero-kicker"><span className="live-dot" />Issuer controls <span className="hero-separator">/</span> Northstar Academy</div><h2>Credential registry</h2><p>Keep the source data private while making status independently verifiable.</p></div><div className="role-hero-stat"><span>{credentialCount ?? 124}</span><small>credentials issued</small><b><ArrowUpRight size={13} /> 18.2%</b></div></div><div className="role-grid"><section className="panel role-stat-panel"><div className="panel-heading"><div><p className="eyebrow">Registry health</p><h2>Issuer controls</h2></div><Building2 size={19} className="muted-icon" /></div><div className="role-control-list"><div><span>Active credentials</span><strong>{activeCredentialCount ?? 118}</strong></div><div><span>Expiring in 30 days</span><strong>6</strong></div><div><span>Revoked this month</span><strong>{revokedCount ?? 2}</strong></div></div></section><section className="panel role-stat-panel"><div className="panel-heading"><div><p className="eyebrow">Latest activity</p><h2>Registry events</h2></div><button className="text-button" onClick={() => toast("Issuer activity", { description: "The complete registry audit log is available in Activity." })}>View log <ChevronRight size={15} /></button></div><div className="role-event"><div className="activity-icon activity-approved"><CheckCircle2 size={15} /></div><div><strong>Credential issued</strong><p>Cybersecurity Bootcamp · 2 min ago</p></div><StatusPill status="Approved" /></div><div className="role-event"><div className="activity-icon activity-revoked"><XCircle size={15} /></div><div><strong>Credential revoked</strong><p>Community Steward · 3 days ago</p></div><StatusPill status="Revoked" /></div></section></div><section className="role-security-note"><LockKeyhole size={18} /><div><strong>Issuer signing stays in your wallet.</strong><p>ProofPass prepares the transaction; Midnight wallet confirms and submits it. Private holder attributes never enter the public registry.</p></div><span className={`connector-state ${walletSession ? "connector-live" : ""}`}>{walletSession ? "Wallet ready" : "Connect wallet"}</span><span className={`artifact-status ${artifactIsReady ? "artifact-status-ready" : ""}`}>{artifactIsReady ? "Artifacts ready" : artifactState.label}</span><button className="button button-ghost role-register-button" onClick={onRegisterIssuer}>Register issuer</button></section></div>;
+  return <div className="page-content role-page"><SectionHeader eyebrow="Issuer workspace" title="Issue with confidence." description="Create, manage, and revoke credentials without exposing holder data." action={<button className="button button-primary" onClick={prepareIssue}><Plus size={16} /> Issue credential</button>} /><div className="role-hero role-issuer"><div><div className="hero-kicker"><span className="live-dot" />Issuer controls <span className="hero-separator">/</span> Northstar Academy <DemoTag /></div><h2>Credential registry</h2><p>Keep the source data private while making status independently verifiable.</p></div><div className="role-hero-stat"><span>{count(credentialCount)}</span><small>credentials issued</small><b><ArrowUpRight size={13} /> 18.2% <DemoTag /></b></div></div><div className="role-grid"><section className="panel role-stat-panel"><div className="panel-heading"><div><p className="eyebrow">Registry health</p><h2>Issuer controls</h2></div><Building2 size={19} className="muted-icon" /></div><div className="role-control-list"><div><span>Active credentials</span><strong>{count(activeCredentialCount)}</strong></div><div><span>Expiring soon</span><strong>{count(expiringCount)}</strong></div><div><span>Revoked</span><strong>{count(revokedCount)}</strong></div></div></section><section className="panel role-stat-panel"><div className="panel-heading"><div><p className="eyebrow">Latest activity</p><h2>Registry events <DemoTag /></h2></div><button className="text-button" onClick={() => toast("Issuer activity", { description: "The complete registry audit log is available in Activity." })}>View log <ChevronRight size={15} /></button></div><div className="role-event"><div className="activity-icon activity-approved"><CheckCircle2 size={15} /></div><div><strong>Credential issued</strong><p>Cybersecurity Bootcamp · 2 min ago</p></div><StatusPill status="Approved" /></div><div className="role-event"><div className="activity-icon activity-revoked"><XCircle size={15} /></div><div><strong>Credential revoked</strong><p>Community Steward · 3 days ago</p></div><StatusPill status="Revoked" /></div></section></div><section className="role-security-note"><LockKeyhole size={18} /><div><strong>Issuer signing stays in your wallet.</strong><p>ProofPass prepares the transaction; Midnight wallet confirms and submits it. Private holder attributes never enter the public registry.</p></div><span className={`connector-state ${walletSession ? "connector-live" : ""}`}>{walletSession ? "Wallet ready" : "Connect wallet"}</span><span className={`artifact-status ${artifactIsReady ? "artifact-status-ready" : ""}`}>{artifactIsReady ? "Artifacts ready" : artifactState.label}</span><button className="button button-ghost role-register-button" onClick={onRegisterIssuer}>Register issuer</button></section></div>;
 }
 
 function VerifierWorkspace({ walletSession, onConnect, onCreateRequest }: { walletSession: MidnightWalletSession | null; onConnect: () => void; onCreateRequest: () => void }) {
-  return <div className="page-content role-page"><SectionHeader eyebrow="Verifier workspace" title="Ask for less. Know enough." description="Build purpose-bound policies and receive only the facts your decision requires." action={<button className="button button-dark" onClick={() => walletSession ? onCreateRequest() : onConnect()}><QrCode size={16} /> Create proof request</button>} /><div className="role-hero role-verifier"><div><div className="hero-kicker"><span className="live-dot" />Verifier controls <span className="hero-separator">/</span> Admissions team</div><h2>Verification workspace</h2><p>Replace document collection with a precise, auditable proof policy.</p></div><div className="role-hero-stat"><span>86%</span><small>less data requested</small><b><ShieldCheck size={13} /> Privacy-first</b></div></div><div className="policy-builder"><div className="panel-heading"><div><p className="eyebrow">Policy builder</p><h2>Confirm bootcamp completion</h2></div><StatusPill status="Active" /></div><p className="policy-purpose">Purpose: assess eligibility for the advanced security cohort.</p><div className="policy-conditions"><div className="policy-condition"><span className="condition-number">01</span><div><strong>Completion status</strong><p>Must equal <b>completed</b></p></div><CheckCircle2 size={18} /></div><div className="policy-connector">AND</div><div className="policy-condition"><span className="condition-number">02</span><div><strong>Credential status</strong><p>Must be <b>active</b> and not expired</p></div><CheckCircle2 size={18} /></div></div><div className="policy-footer"><span><LockKeyhole size={14} /> Holder controls final disclosure</span><button className="button button-primary" onClick={() => toast("Policy saved", { description: "The verifier policy is ready for a new request." })}>Save policy <Check size={15} /></button></div></div><div className="role-security-note"><ShieldCheck size={18} /><div><strong>Verification returns facts, not files.</strong><p>Every presentation includes a nonce, expiry, and issuer status check before it is accepted.</p></div><span className={`connector-state ${walletSession ? "connector-live" : ""}`}>{walletSession ? "Wallet ready" : "Connect wallet"}</span></div></div>;
+  return <div className="page-content role-page"><SectionHeader eyebrow="Verifier workspace" title="Ask for less. Know enough." description="Build purpose-bound policies and receive only the facts your decision requires." action={<button className="button button-dark" onClick={() => walletSession ? onCreateRequest() : onConnect()}><QrCode size={16} /> Create proof request</button>} /><div className="role-hero role-verifier"><div><div className="hero-kicker"><span className="live-dot" />Verifier controls <span className="hero-separator">/</span> Admissions team <DemoTag /></div><h2>Verification workspace</h2><p>Replace document collection with a precise, auditable proof policy.</p></div><div className="role-hero-stat"><span>86%</span><small>less data requested</small><b><ShieldCheck size={13} /> Privacy-first <DemoTag /></b></div></div><div className="policy-builder"><div className="panel-heading"><div><p className="eyebrow">Policy builder</p><h2>Confirm bootcamp completion <DemoTag /></h2></div><StatusPill status="Active" /></div><p className="policy-purpose">Purpose: assess eligibility for the advanced security cohort.</p><div className="policy-conditions"><div className="policy-condition"><span className="condition-number">01</span><div><strong>Completion status</strong><p>Must equal <b>completed</b></p></div><CheckCircle2 size={18} /></div><div className="policy-connector">AND</div><div className="policy-condition"><span className="condition-number">02</span><div><strong>Credential status</strong><p>Must be <b>active</b> and not expired</p></div><CheckCircle2 size={18} /></div></div><div className="policy-footer"><span><LockKeyhole size={14} /> Holder controls final disclosure</span><button className="button button-primary" onClick={() => toast("Policy saved", { description: "The verifier policy is ready for a new request." })}>Save policy <Check size={15} /></button></div></div><div className="role-security-note"><ShieldCheck size={18} /><div><strong>Verification returns facts, not files.</strong><p>Every presentation includes a nonce, expiry, and issuer status check before it is accepted.</p></div><span className={`connector-state ${walletSession ? "connector-live" : ""}`}>{walletSession ? "Wallet ready" : "Connect wallet"}</span></div></div>;
 }
 
 function SearchOverlay({ onClose, onNavigate }: { onClose: () => void; onNavigate: (workspace: Workspace) => void }) {
@@ -559,8 +569,15 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const persistedCredentialCount = isAuthenticated && registryQuery.data ? persistedCredentials.length : undefined;
   const persistedActiveCredentialCount = isAuthenticated && registryQuery.data ? persistedCredentials.filter((credential) => credential.status === "active" || credential.status === "expiring").length : undefined;
   const persistedRevokedCount = isAuthenticated && registryQuery.data ? persistedCredentials.filter((credential) => credential.status === "revoked").length : undefined;
+  const persistedExpiringCount = isAuthenticated && registryQuery.data ? persistedCredentials.filter((credential) => credential.status === "expiring").length : undefined;
+  // Badges only appear for counts that came from the store; the seeded rows are
+  // labelled in the list itself and must not inflate a number in the sidebar.
+  const navCounts: Partial<Record<Workspace, number>> = {
+    credentials: persistedCredentialCount || undefined,
+    requests: serverRequests.length || undefined,
+  };
 
   const pageTitle: Record<Workspace, string> = { overview: "Overview", credentials: "Credentials", requests: "Proof requests", activity: "Activity", issuer: "Issuer workspace", verifier: "Verifier workspace", settings: "Settings" };
 
-  return <div className="app-shell"><div className={`sidebar-wrap ${mobileOpen ? "sidebar-wrap-open" : ""}`}><Sidebar workspace={workspace} onWorkspaceChange={onWorkspaceChange} onClose={() => setMobileOpen(false)} /></div><div className="app-main"><Topbar onOpenMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} walletSession={walletSession} walletCount={wallets.length} onConnect={openWalletPicker} /><div className="mobile-page-title"><span>{pageTitle[workspace]}</span><div className="mobile-status"><span className="network-pulse" /> {walletSession ? "Connected" : "Demo"}</div></div>{workspace === "overview" && <Overview onWorkspaceChange={onWorkspaceChange} onApprove={approveRequest} requests={allRequests} activity={activity} />}{workspace === "credentials" && <Credentials onAdd={() => toast("Receive credential", { description: "Your issuer invite link will appear here." })} />}{workspace === "requests" && <ProofRequests onApprove={approveRequest} requests={allRequests} onCreate={openCreateRequest} />}{workspace === "activity" && <ActivityPage activity={activity} />}{workspace === "issuer" && <IssuerWorkspace walletSession={walletSession} onConnect={openWalletPicker} onRegisterIssuer={registerIssuer} credentialCount={persistedCredentialCount} activeCredentialCount={persistedActiveCredentialCount} revokedCount={persistedRevokedCount} artifactReady={Boolean(contractStatusQuery.data?.configured && contractStatusQuery.data.moduleAvailable && contractStatusQuery.data.assetsAvailable)} />}{workspace === "verifier" && <VerifierWorkspace walletSession={walletSession} onConnect={openWalletPicker} onCreateRequest={openCreateRequest} />}{workspace === "settings" && <Settings />}</div>{activeRequest && <ApprovalModal request={activeRequest} onClose={() => setActiveRequest(null)} onApprove={resolveApproval} onDecline={resolveDecline} isBusy={resolvingRequest} />}{searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={onWorkspaceChange} />}{walletPickerOpen && <WalletPickerModal wallets={wallets} incompatible={walletScan.incompatible} foreign={foreignWallets} network={targetNetwork} onNetworkChange={(next) => { setTargetNetwork(next); setStoredNetwork(next); }} onClose={() => setWalletPickerOpen(false)} onSelect={connectWallet} isConnecting={connectingWallet} />}{createRequestOpen && <CreateRequestModal onClose={() => setCreateRequestOpen(false)} onSubmit={submitCreateRequest} isSaving={createProofRequest.isPending} />}</div>;
+  return <div className="app-shell"><div className={`sidebar-wrap ${mobileOpen ? "sidebar-wrap-open" : ""}`}><Sidebar workspace={workspace} onWorkspaceChange={onWorkspaceChange} onClose={() => setMobileOpen(false)} accountName={user ? (user.name?.trim() || user.openId) : null} counts={navCounts} /></div><div className="app-main"><Topbar onOpenMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} walletSession={walletSession} walletCount={wallets.length} onConnect={openWalletPicker} /><div className="mobile-page-title"><span>{pageTitle[workspace]}</span><div className="mobile-status"><span className="network-pulse" /> {walletSession ? "Connected" : "Demo"}</div></div>{workspace === "overview" && <Overview onWorkspaceChange={onWorkspaceChange} onApprove={approveRequest} requests={allRequests} activity={activity} walletSession={walletSession} />}{workspace === "credentials" && <Credentials onAdd={() => toast("Receive credential", { description: "Your issuer invite link will appear here." })} />}{workspace === "requests" && <ProofRequests onApprove={approveRequest} requests={allRequests} onCreate={openCreateRequest} />}{workspace === "activity" && <ActivityPage activity={activity} />}{workspace === "issuer" && <IssuerWorkspace walletSession={walletSession} onConnect={openWalletPicker} onRegisterIssuer={registerIssuer} credentialCount={persistedCredentialCount} activeCredentialCount={persistedActiveCredentialCount} revokedCount={persistedRevokedCount} expiringCount={persistedExpiringCount} artifactReady={Boolean(contractStatusQuery.data?.configured && contractStatusQuery.data.moduleAvailable && contractStatusQuery.data.assetsAvailable)} />}{workspace === "verifier" && <VerifierWorkspace walletSession={walletSession} onConnect={openWalletPicker} onCreateRequest={openCreateRequest} />}{workspace === "settings" && <Settings />}</div>{activeRequest && <ApprovalModal request={activeRequest} onClose={() => setActiveRequest(null)} onApprove={resolveApproval} onDecline={resolveDecline} isBusy={resolvingRequest} />}{searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={onWorkspaceChange} />}{walletPickerOpen && <WalletPickerModal wallets={wallets} incompatible={walletScan.incompatible} foreign={foreignWallets} network={targetNetwork} onNetworkChange={(next) => { setTargetNetwork(next); setStoredNetwork(next); }} onClose={() => setWalletPickerOpen(false)} onSelect={connectWallet} isConnecting={connectingWallet} />}{createRequestOpen && <CreateRequestModal onClose={() => setCreateRequestOpen(false)} onSubmit={submitCreateRequest} isSaving={createProofRequest.isPending} />}</div>;
 }
