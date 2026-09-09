@@ -20,7 +20,7 @@ Seeded rows are labelled **Demo** in the UI wherever they sit next to stored one
 | Midnight wallet connection | **Real.** Midnight DApp Connector API v4 against Lace, with a wallet picker, API-version filtering, and an explicit "no Midnight wallet" state. |
 | Proof requests (create / approve / decline) | **Real.** Stored in MySQL behind authenticated tRPC procedures, with a consent record carrying a single-use nonce and the disclosed facts. |
 | Compact contract | **Compiled and deployed.** `contracts/proofpass.compact` builds to five circuits with real prover and verifier keys, and the browser deploys it through the connected wallet. |
-| On-chain transactions | **Deploy exercised, circuits wired.** The deploy has been run against preprod through Lace. The five circuits are callable from the On-chain workspace and have not yet been run live — see [Deploying the contract](#deploying-the-contract). |
+| On-chain transactions | **Real.** Deploy plus `registerIssuer`, `issueCredential`, `proveEligibility` and `revokeCredential` have all been run against preprod through Lace, with the resulting ledger state read back from the indexer. `revokeIssuer` is implemented and deliberately unexercised — see [Deploying the contract](#deploying-the-contract). |
 | Credentials, privacy score, issuer registry health, policy builder | **Seeded demo data.** |
 | Hosted sign-in | **Not configured.** Without `VITE_OAUTH_PORTAL_URL` the sign-in prompt says so rather than failing silently. |
 
@@ -160,6 +160,24 @@ each followed by reading the ledger back, because a transaction that succeeds is
 evidence that state changed. It is deliberately separate from the issuer and verifier workspaces,
 which still move rows in MySQL and show seeded data.
 
+Run end to end on preprod against contract
+`cb2eed75ab1b3b13ef7404db5ee49d4a0628e64d4bdb5fe4ed5e563b153f892c`, whose ledger the indexer
+then reported as:
+
+```
+issuers          1   a2b527777a…056b70d8 -> ACTIVE      registerIssuer
+credentials      0                                      issueCredential, then
+revoked          1   5a2707d65382…0a941f0a               revokeCredential moved it here
+spentNonces      1                                      proveEligibility
+acceptedProofs   1                                      proveEligibility
+```
+
+`acceptedProofs` is the one that matters: the counter increments only inside `proveEligibility`,
+after every one of its assertions has passed — issuer registered and active, nonce unspent,
+deadline in the future, commitment present and unrevoked. A real proof was verified on chain.
+The issuer id is `sha256("proofpass:issuer:northstar-academy")`, which is what makes it
+reproducible from the slug alone.
+
 `localSecretKey()` is the constraint that shapes it: `assertAuthority()` hashes it into the
 registry authority, while `proveEligibility` derives the credential commitment from it as the
 *holder's* secret. One private state cannot be both, so the two roles keep separate secrets under
@@ -213,9 +231,19 @@ contracts/             proofpass.compact and its build output (gitignored)
 
 ## Known limitations
 
-- Only the deploy has been exercised on chain so far. The five circuits are wired and callable
-  from the On-chain workspace, but have not yet been run against a live network.
+- `revokeIssuer` is implemented and never exercised: calling it stops the issuer from issuing
+  anything further, so it sits off the workflow path.
 - The issuer, verifier and holder workspaces still read and write MySQL rows, not ledger state.
+  Only the On-chain workspace touches the contract.
+- A circuit call needs a proof server that accepts multi-megabyte request bodies. The hosted
+  preprod prover does not: it sits behind a proxy that refuses bodies over roughly 4–8 KB, while a
+  call uploads its proving key — 2.7 MB for `registerIssuer` — so every call fails there as
+  `TypeError: Failed to fetch`. Set `VITE_PROOF_SERVER_URI` to a local proof server
+  (`tools/localnet/standalone.yml` runs one on 6300). Deploy is unaffected: it uploads no proving
+  data, which is why deploying works there and calling does not.
+- Fees are paid from a DUST tank that designated NIGHT refills over time, and a deploy can leave
+  the NIGHT undesignated — `0 / 0 tDUST` in Lace with a NIGHT balance still showing. Re-designate
+  with **Generate tDUST** before expecting the tank to refill.
 - Credentials, privacy score, and the policy builder are seeded data.
 - Hosted sign-in requires an OAuth server this repository does not include.
 - A decline reason is shown back to the holder but not stored — `proofRequests` has no column for it.
