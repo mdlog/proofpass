@@ -19,14 +19,15 @@ Seeded rows are labelled **Demo** in the UI wherever they sit next to stored one
 |---|---|
 | Midnight wallet connection | **Real.** Midnight DApp Connector API v4 against Lace, with a wallet picker, API-version filtering, and an explicit "no Midnight wallet" state. |
 | Proof requests (create / approve / decline) | **Real.** Stored in MySQL behind authenticated tRPC procedures, with a consent record carrying a single-use nonce and the disclosed facts. |
-| Compact contract | **Compiled, not deployed.** `contracts/proofpass.compact` builds to five circuits with real prover and verifier keys; the server constructs a genuine `CompiledContract`. |
-| On-chain transactions | **None yet.** Deployment needs tDUST for fees — see [Deploying the contract](#deploying-the-contract). |
+| Compact contract | **Compiled and deployed.** `contracts/proofpass.compact` builds to five circuits with real prover and verifier keys, and the browser deploys it through the connected wallet. |
+| On-chain transactions | **Deployment only.** The deploy transaction is prepared here and then balanced, proved and submitted by the wallet. The five circuits are not called yet — see [Deploying the contract](#deploying-the-contract). |
 | Credentials, privacy score, issuer registry health, policy builder | **Seeded demo data.** |
 | Hosted sign-in | **Not configured.** Without `VITE_OAUTH_PORTAL_URL` the sign-in prompt says so rather than failing silently. |
 
-The Midnight adapter is therefore a **prepared** adapter, not a submitting one: it loads the
-generated module, validates circuits against it, and stops short of claiming a transaction was
-sent (ARCHITECTURE §20).
+The app still never holds a key and never talks to a node: it prepares the transaction, and the
+wallet signs and submits it (ARCHITECTURE §18). What it no longer stops short of is the deploy
+itself — that path has been run end to end against preprod through Lace, and the address it
+returns is recorded rather than logged.
 
 ## Requirements
 
@@ -123,8 +124,8 @@ pm2 start ecosystem.config.cjs && pm2 save
 
 ## Deploying the contract
 
-Not done yet, and the reason is concrete: the wallet's DUST balance is zero, so nothing can pay
-transaction fees.
+Done: `contracts/proofpass.compact` has been deployed to preprod from the browser through Lace.
+What follows is what it takes to repeat it.
 
 1. Request tNIGHT from the network faucet — preview:
    <https://midnight-tmnight-preview.nethermind.dev/>, preprod:
@@ -138,8 +139,11 @@ transaction fees.
    `getConfiguration()` returns `indexerUri`, `indexerWsUri`, `proverServerUri` and
    `substrateNodeUri`, and `getProvingProvider()` pairs with
    `@midnight-ntwrk/midnight-js-dapp-connector-proof-provider`.
-4. Call `deployContract` from `@midnight-ntwrk/midnight-js-contracts`, then store the returned
-   address in `issuers.contractAddress` (the column already exists).
+4. Press **Deploy contract** in the issuer workspace. `client/src/lib/proofpassDeploy.ts` checks
+   the DUST balance first so a wallet that cannot pay says why, then calls `deployContract` from
+   `@midnight-ntwrk/midnight-js-contracts`. The returned address is written to localStorage
+   immediately and then recorded in `issuers.contractAddress` against an issuer on the same
+   network.
 
 `client/src/lib/midnightProviders.ts` assembles the providers from a connected wallet. The two
 interfaces that looked mismatched turned out to be the same object in different clothes: the
@@ -150,10 +154,24 @@ connector's own documentation says `balanceUnsealedTransaction` takes a serialis
 `TransactionId` that `submitTransaction` never returns comes off the transaction itself via
 `identifiers()`.
 
-What is still missing is the deploy call that uses them, and the browser-side `CompiledContract`
-it needs. That is deliberate: none of it can be exercised until a wallet authorises the origin and
-the account holds DUST, and shipping an unexercised deploy path is how a demo turns into a false
-claim.
+What is still missing is calling the circuits. `deployContract` hands back a `callTx` interface
+for `registerIssuer`, `issueCredential`, `revokeCredential` and `proveEligibility`, and nothing
+uses it yet: issuing and revoking still move rows in MySQL rather than ledger state.
+
+Four things a browser build needs that a Node one does not, each of which failed loudly before it
+was handled:
+
+- **A `Buffer` global.** compact-runtime, platform-js and wallet-sdk-address-format call it
+  without importing it. `client/src/lib/bufferPolyfill.ts` installs it as the entry's first import.
+- **A fetch that is not passed as a method.** `FetchZkConfigProvider` invokes its fetch as
+  `this.fetchFunc(...)`, and cross-fetch hands over `window.fetch` unbound, so the browser refuses
+  with "Illegal invocation". `ReportingZkConfigProvider` supplies one that calls the host's fetch
+  plainly.
+- **A private state provider.** `submitDeployTx` writes the contract address, private state and
+  signing key through it *after* submitting, so without one a deploy succeeds on chain and then
+  throws. In a browser `level` resolves to browser-level, so the store is IndexedDB.
+- **A password that passes the storage policy.** That provider wants sixteen characters and three
+  of four character classes, which a hex string does not have.
 
 No local proof server is needed on the public testnets: the wallet's `getConfiguration()`
 points at a hosted prover.
@@ -186,7 +204,8 @@ contracts/             proofpass.compact and its build output (gitignored)
 
 ## Known limitations
 
-- No on-chain transaction has been made; the contract is compiled but not deployed.
+- The only on-chain transaction is the deploy; the five circuits are never called, so issuing and
+  revoking change stored rows rather than ledger state.
 - Credentials, privacy score, and the policy builder are seeded data.
 - Hosted sign-in requires an OAuth server this repository does not include.
 - A decline reason is shown back to the holder but not stored — `proofRequests` has no column for it.
