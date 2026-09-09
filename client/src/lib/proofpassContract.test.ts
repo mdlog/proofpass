@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, dustBlocker, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -385,5 +385,33 @@ describe("walletEndpoints", () => {
     const rows = walletEndpoints(full, "http://localhost:6300");
     expect(rows).toContainEqual({ label: "Prover", value: "http://localhost:6300 (app override)" });
     expect(rows).not.toContainEqual({ label: "Prover", value: "http://127.0.0.1:6300" });
+  });
+});
+
+/**
+ * Fees are paid in DUST, and the tank drains as it is spent and refills from
+ * designated NIGHT over time. Running out shows up only at the balance step —
+ * after the proof has already been computed — as
+ * "Insufficient Funds: could not balance dust".
+ */
+describe("dustBlocker", () => {
+  it("says nothing when there is DUST to spend", () => {
+    expect(dustBlocker({ balance: 500n, cap: 1000n, registered: true })).toBeNull();
+  });
+
+  it("explains an empty tank as something that refills, not something broken", () => {
+    const blocker = dustBlocker({ balance: 0n, cap: 1000n, registered: true });
+    expect(blocker).toMatch(/refills|wait/i);
+  });
+
+  it("distinguishes never having designated NIGHT from having spent the tank", () => {
+    expect(dustBlocker({ balance: 0n, cap: 0n, registered: false })).toMatch(/Generate tDUST/);
+    expect(dustBlocker({ balance: 0n, cap: 1000n, registered: true })).not.toMatch(/Generate tDUST/);
+  });
+
+  it("does not pretend a non-zero balance is certainly enough", () => {
+    // The fee is not known until the wallet balances, so a small balance is
+    // allowed through and the wallet remains the authority on whether it covers.
+    expect(dustBlocker({ balance: 1n, cap: 1000n, registered: true })).toBeNull();
   });
 });

@@ -8,10 +8,10 @@ import { buildMidnightProviders, resolveProofServerUri } from "../lib/midnightPr
 import type { MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
-  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
+  dustBlocker, fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
   type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
 } from "../lib/proofpassContract";
-import { resolveAuthoritySecret } from "../lib/proofpassDeploy";
+import { readDustBalance, resolveAuthoritySecret } from "../lib/proofpassDeploy";
 
 /**
  * The issuer → holder → verifier workflow, run against the deployed contract.
@@ -42,6 +42,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
   const [identity, setIdentity] = useState<{ issuerId: Uint8Array; commitment: Uint8Array } | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<LedgerSnapshot | null>(null);
+  const [dust, setDust] = useState<{ balance: bigint; cap: bigint; registered: boolean } | null>(null);
   const [busy, setBusy] = useState<WorkflowStep | "read" | null>(null);
   const providersRef = useRef<Providers | null>(null);
 
@@ -77,8 +78,12 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     setBusy("read");
     try {
       const resolved = providers ?? await ensureProviders();
-      const next = await fetchLedgerSnapshot(resolved as never, address.trim());
+      const [next, balance] = await Promise.all([
+        fetchLedgerSnapshot(resolved as never, address.trim()),
+        readDustBalance(walletSession!.connected as never).catch(() => null),
+      ]);
       setSnapshot(next);
+      setDust(balance);
       if (!next) toast.error("No contract at that address", { description: "The indexer has never seen it on this network." });
     } catch (error) {
       toast.error("Could not read the ledger", { description: readableMessage(error, "The indexer did not answer.") });
@@ -93,6 +98,12 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     setBusy(step);
     try {
       const providers = await ensureProviders();
+      // Proving takes real time; there is no point spending it on a transaction
+      // the wallet already cannot pay for.
+      const balance = await readDustBalance(walletSession!.connected as never);
+      setDust(balance);
+      const unpayable = dustBlocker(balance);
+      if (unpayable) throw new Error(unpayable);
       const secret = role === "holder" ? resolveHolderSecret().secret : resolveAuthoritySecret().secret;
       const calls = callsOf(await connectProofPass(providers, address.trim(), role, secret));
       if (step === "register") await calls.registerIssuer(identity.issuerId);
@@ -153,6 +164,10 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Wallet endpoints</p><h2>Where this proves and reads</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
       <div className="role-control-list">{walletEndpoints(walletSession?.configuration, resolveProofServerUri()).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}</div>
+      <div className="role-control-list">
+        <div><span>DUST balance</span><strong>{dust ? `${dust.balance} of ${dust.cap}` : "read the ledger to load"}</strong></div>
+      </div>
+      {dust && dustBlocker(dust) && <p className="modal-note"><XCircle size={14} /> {dustBlocker(dust)}</p>}
       <p className="modal-note">Proving runs inside the wallet against its own prover — a step that fails with "Failed to fetch" failed to reach one of these.</p>
     </section>
 

@@ -316,3 +316,25 @@ export function walletEndpoints(configuration?: WalletConfiguration, proofServer
     { label: "Node", value: value(configuration?.substrateNodeUri) },
   ];
 }
+
+/**
+ * Why a step cannot be paid for, or null when it might be.
+ *
+ * Fees are paid in DUST, which designated NIGHT generates over time into a tank
+ * that spending drains. Running dry surfaces only at the balance step — after
+ * the proof has already been computed, which is the slow part — as
+ * "Insufficient Funds: could not balance dust". Checking first costs nothing.
+ *
+ * A non-zero balance is let through: the fee is not known until the wallet
+ * balances the transaction, so the wallet stays the authority on whether it
+ * covers. This only catches the case that is certain.
+ */
+export function dustBlocker(dust: { balance: bigint; cap: bigint; registered: boolean }): string | null {
+  if (!dust.registered) {
+    return "This wallet generates no DUST yet. In Lace, open Tokens and use \"Generate tDUST\" to designate your NIGHT — fees are paid in DUST, not NIGHT.";
+  }
+  if (dust.balance === 0n) {
+    return `DUST balance is 0 of a ${dust.cap} cap. The tank refills from designated NIGHT over time — wait for it to fill and retry.`;
+  }
+  return null;
+}

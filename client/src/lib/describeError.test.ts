@@ -23,6 +23,34 @@ describe("readableMessage", () => {
     expect(readableMessage(fiberFailure())).toBe("Insufficient Funds: could not balance dust");
   });
 
+  /**
+   * A later SDK path wrapped the same failure in a message that is not empty but
+   * says nothing — it ends by naming the error class, "…: Error" — so the walk
+   * stopped at the wrapper and "could not balance dust" never reached the
+   * screen. Observed on a registerIssuer call, 2026-09-09.
+   */
+  it("keeps looking past a wrapper that names an error class and nothing else", () => {
+    const wrapped = new Error("Unexpected error submitting scoped transaction '<unnamed>': Error");
+    (wrapped as Error & { cause?: unknown }).cause = fiberFailure();
+    expect(readableMessage(wrapped)).toBe("Insufficient Funds: could not balance dust");
+  });
+
+  it("treats a bare \"Error\" as saying nothing either", () => {
+    const wrapped = new Error("Error");
+    (wrapped as Error & { cause?: unknown }).cause = fiberFailure();
+    expect(readableMessage(wrapped)).toBe("Insufficient Funds: could not balance dust");
+  });
+
+  it("keeps a wrapper that does carry detail, even when a cause follows", () => {
+    const wrapped = new Error("Access to wallet api denied");
+    (wrapped as Error & { cause?: unknown }).cause = fiberFailure();
+    expect(readableMessage(wrapped)).toBe("Access to wallet api denied");
+  });
+
+  it("keeps a message that merely starts with an error class name", () => {
+    expect(readableMessage(new Error("TypeError: Failed to fetch"))).toBe("TypeError: Failed to fetch");
+  });
+
   it("prefers a plain message when there is one", () => {
     expect(readableMessage(new Error("Access to wallet api denied"))).toBe("Access to wallet api denied");
   });

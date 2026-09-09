@@ -93,14 +93,26 @@ function messageFromProperties(properties?: Record<string, unknown>): string | u
   return typeof own === "string" && own ? own : undefined;
 }
 
+/**
+ * Whether a message says what went wrong, or only where it was caught.
+ *
+ * The SDK wraps a failure as "Unexpected error submitting scoped transaction
+ * '<unnamed>': Error" — not empty, so a naive walk stops there, and yet the only
+ * thing it adds is the name of a class. Effect puts the reason underneath, in
+ * the Cause's `failure`.
+ */
+function saysWhatWentWrong(message: string): boolean {
+  return message.trim() !== "[object Object]" && !/(^|:\s*)\w*Error$/.test(message.trim());
+}
+
 /** The first meaningful message anywhere in the chain, for showing to a user. */
 export function readableMessage(error: unknown, fallback = "The wallet did not complete the action."): string {
   let described: DescribedError | undefined = describeError(error);
   while (described) {
-    if (described.message) return described.message;
+    if (described.message && saysWhatWentWrong(described.message)) return described.message;
     const fromProperties = messageFromProperties(described.properties);
     if (fromProperties) return fromProperties;
-    if (described.text && described.text !== "[object Object]" && !/^\w*Error$/.test(described.text)) return described.text;
+    if (described.text && saysWhatWentWrong(described.text)) return described.text;
     described = described.cause;
   }
   return fallback;
