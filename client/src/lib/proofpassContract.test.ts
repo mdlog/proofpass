@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, dustBlocker, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, dustBlocker, issuerDisplayName, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -425,5 +425,29 @@ describe("dustBlocker", () => {
     // The fee is not known until the wallet balances, so a small balance is
     // allowed through and the wallet remains the authority on whether it covers.
     expect(dustBlocker({ balance: 1n, cap: 1000n, registered: true })).toBeNull();
+  });
+});
+
+/**
+ * The on-chain issuer id is a digest of the slug, so the registry row has to
+ * carry the same slug or the two identities can never meet. Issuer registration
+ * used to invent a random suffix, which guaranteed they never would.
+ */
+describe("issuerDisplayName", () => {
+  it("reads a slug back as a name, so registering needs no second field", () => {
+    expect(issuerDisplayName("northstar-academy")).toBe("Northstar Academy");
+  });
+
+  it("handles a single word", () => {
+    expect(issuerDisplayName("northstar")).toBe("Northstar");
+  });
+
+  it("leaves digits and short parts alone rather than mangling them", () => {
+    expect(issuerDisplayName("acme-42-labs")).toBe("Acme 42 Labs");
+  });
+
+  it("never returns something too short for the registry to accept", () => {
+    expect(issuerDisplayName("a").length).toBeGreaterThanOrEqual(2);
+    expect(issuerDisplayName("").length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -8,7 +8,7 @@ import { buildMidnightProviders, resolveProofServerUri } from "../lib/midnightPr
 import { isMidnightNetwork, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
-  dustBlocker, fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
+  dustBlocker, fetchLedgerSnapshot, freshNonce, issuerDisplayName, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
   type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
 } from "../lib/proofpassContract";
 import { readDustBalance, resolveAuthoritySecret } from "../lib/proofpassDeploy";
@@ -48,12 +48,15 @@ export type IssuedCredential = {
   expiresAt: Date;
 };
 
-export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentialIssued, onCredentialRevoked }: {
+export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentialIssued, onCredentialRevoked, onRegisterIssuer, canRegisterIssuer }: {
   walletSession: MidnightWalletSession | null;
   onConnect: () => void;
   issuers: RegistryIssuer[];
   onCredentialIssued: (credential: IssuedCredential) => Promise<void>;
   onCredentialRevoked: (credentialKey: string) => Promise<void>;
+  /** Registers this slug in the registry, so the row and the on-chain id agree. */
+  onRegisterIssuer: (slug: string, networkId: MidnightNetwork) => Promise<void>;
+  canRegisterIssuer: boolean;
 }) {
   const [address, setAddress] = useState(() => lastDeployedContract()?.contractAddress ?? "");
   const [draft, setDraft] = useState<CredentialDraft>(() => lastCredentialDraft() ?? { slug: "northstar-academy", expiresAt: expirySecondsFromNow(3600), title: "Bootcamp completion" });
@@ -119,6 +122,25 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
    * commitment is already on the ledger by the time this runs, and reporting the
    * transaction as failed because a row did not save would be a lie.
    */
+  /**
+   * Registers the slug the on-chain id is derived from, on the network the
+   * wallet is actually on. Issuer registration elsewhere invents a slug suffix,
+   * which makes a row that can never match a ledger entry.
+   */
+  const registerIssuerRow = async () => {
+    const network = walletSession?.configuration?.networkId;
+    if (!network || !isMidnightNetwork(network)) {
+      toast.error("Cannot register", { description: `The wallet reports network "${network ?? "none"}", which this build does not recognise.` });
+      return;
+    }
+    try {
+      await onRegisterIssuer(draft.slug, network);
+      toast.success("Issuer registered", { description: `${issuerDisplayName(draft.slug)} on ${network} — credentials will be recorded against it.` });
+    } catch (error) {
+      toast.error("Issuer not registered", { description: readableMessage(error, "The registry write failed.") });
+    }
+  };
+
   const recordIssued = async (commitment: string) => {
     if (!registryIssuer) {
       toast("Credential not recorded", { description: `No registry issuer with the slug "${draft.slug}" — sign in and register one to keep credentials.` });
@@ -216,7 +238,11 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
     <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Deployed contract</p><h2>Contract under test</h2></div><Blocks size={19} className="muted-icon" /></div>
       <label className="request-field"><span>Contract address</span><input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="0200…" spellCheck={false} /></label>
-      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} list="registry-issuer-slugs" /><datalist id="registry-issuer-slugs">{issuers.map((issuer) => <option key={issuer.id} value={issuer.slug}>{issuer.displayName}</option>)}</datalist><small>{registryIssuer ? `Registry: ${registryIssuer.displayName} — credentials will be recorded against it.` : "Registry: no issuer with this slug. The workflow still runs; the credential is not recorded."}</small></label><label className="request-field"><span>Credential title — metadata, never on the ledger</span><input value={draft.title} onChange={(event) => { const next = { ...draft, title: event.target.value }; rememberCredentialDraft(next); setDraft(next); }} spellCheck={false} /></label>
+      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} list="registry-issuer-slugs" /><datalist id="registry-issuer-slugs">{issuers.map((issuer) => <option key={issuer.id} value={issuer.slug}>{issuer.displayName}</option>)}</datalist><small>{registryIssuer
+        ? `Registry: ${registryIssuer.displayName} — credentials will be recorded against it.`
+        : canRegisterIssuer
+          ? `Registry: no issuer with this slug. Register "${issuerDisplayName(draft.slug)}" to record credentials against it.`
+          : "Registry: no issuer with this slug. The workflow still runs; the credential is not recorded."}</small></label><label className="request-field"><span>Credential title — metadata, never on the ledger</span><input value={draft.title} onChange={(event) => { const next = { ...draft, title: event.target.value }; rememberCredentialDraft(next); setDraft(next); }} spellCheck={false} /></label>
       <div className="role-control-list">
         <div><span>Issuer id</span><strong>{identity ? short(bytesToHex(identity.issuerId)) : "—"}</strong></div>
         <div><span>Commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
@@ -225,6 +251,7 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
       {identityError && <p className="modal-note"><XCircle size={14} /> {identityError}</p>}
       {blocker && <p className="modal-note"><XCircle size={14} /> {blocker}{!walletSession && <> <button className="text-button" onClick={onConnect}>Connect wallet</button></>}</p>}
       <div className="modal-actions">
+        {!registryIssuer && canRegisterIssuer && <button className="button button-ghost" onClick={() => void registerIssuerRow()} disabled={busy !== null}><BadgeCheck size={15} /> Register this issuer</button>}
         <button className="button button-ghost" onClick={() => startDraft(draft.slug)} disabled={busy !== null}><KeyRound size={15} /> Start a new credential</button>
         <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || blocker !== null}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
       </div>

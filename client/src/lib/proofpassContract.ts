@@ -344,3 +344,20 @@ export function dustBlocker(dust: { balance: bigint; cap: bigint; registered: bo
   }
   return null;
 }
+
+/**
+ * A registry display name read back from the slug.
+ *
+ * The on-chain issuer id is a digest of the slug, so the registry row must carry
+ * that exact slug or the two identities can never meet. Deriving the name means
+ * registering needs nothing but the slug already in hand — and the registry's
+ * own minimum length is respected, since a one-character slug is still a slug.
+ */
+export function issuerDisplayName(slug: string): string {
+  const name = slug
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return name.length >= 2 ? name : `${name || "Issuer"} issuer`.trim();
+}
