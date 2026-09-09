@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWalletBridge, DEFAULT_ZK_ASSETS_PATH, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
+import { createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
 
 /**
  * The bridge is pure representation-shuffling between Midnight.js and the DApp
@@ -123,5 +123,58 @@ describe("resolveAssetsBaseUrl", () => {
 
   it("says what is missing rather than throwing a bare URL error", () => {
     expect(() => resolveAssetsBaseUrl("/compact/proofpass", "")).toThrow(/absolute zkAssetsBaseUrl/);
+  });
+});
+
+/**
+ * Midnight.js reads the ZK assets inside an Effect, and every failure comes back
+ * as `ZKConfigurationReadError: Failed to read verifier key for <tag>#<circuit>`.
+ * The reason underneath — a 404, an SPA fallback page, a request the browser
+ * refused — is dropped, so a deploy failure names the symptom and nothing else.
+ */
+describe("ReportingZkConfigProvider", () => {
+  const BASE = "http://localhost:3010/compact/proofpass";
+  const respondWith = (body: BodyInit | null, init: ResponseInit) => async () => new Response(body, init);
+
+  it("keeps the reason a failed read gives, which Midnight.js would drop", async () => {
+    const provider = new ReportingZkConfigProvider(BASE, respondWith(null, { status: 404, statusText: "Not Found" }));
+    await expect(provider.getVerifierKey("registerIssuer")).rejects.toThrow();
+    expect(provider.firstFailure).toMatch(/verifier key for registerIssuer/);
+    expect(provider.firstFailure).toMatch(/404/);
+  });
+
+  it("names the URL it tried, so a wrong base is obvious", async () => {
+    const provider = new ReportingZkConfigProvider(BASE, respondWith(null, { status: 404, statusText: "Not Found" }));
+    await expect(provider.getVerifierKey("registerIssuer")).rejects.toThrow();
+    expect(provider.firstFailure).toContain(`${BASE}/keys/registerIssuer.verifier`);
+  });
+
+  it("recognises an SPA fallback page rather than reporting a bare parse failure", async () => {
+    const provider = new ReportingZkConfigProvider(BASE, respondWith("<!doctype html>", { status: 200, headers: { "content-type": "text/html" } }));
+    await expect(provider.getProverKey("issueCredential")).rejects.toThrow();
+    expect(provider.firstFailure).toMatch(/prover key for issueCredential/);
+    expect(provider.firstFailure).toMatch(/text\/html/);
+  });
+
+  it("keeps a request the browser refused outright", async () => {
+    const provider = new ReportingZkConfigProvider(BASE, async () => { throw new TypeError("Failed to fetch"); });
+    await expect(provider.getZKIR("proveEligibility")).rejects.toThrow();
+    expect(provider.firstFailure).toMatch(/zkir for proveEligibility: Failed to fetch/);
+  });
+
+  it("keeps the first failure, not the last, because all five circuits read at once", async () => {
+    let call = 0;
+    const provider = new ReportingZkConfigProvider(BASE, async () => new Response(null, { status: ++call === 1 ? 404 : 500, statusText: call === 1 ? "Not Found" : "Server Error" }));
+    await expect(provider.getVerifierKey("registerIssuer")).rejects.toThrow();
+    await expect(provider.getVerifierKey("revokeIssuer")).rejects.toThrow();
+    expect(provider.firstFailure).toMatch(/registerIssuer/);
+    expect(provider.firstFailure).not.toMatch(/revokeIssuer/);
+  });
+
+  it("passes a successful read through untouched and records nothing", async () => {
+    const bytes = Uint8Array.from([1, 2, 3, 4]);
+    const provider = new ReportingZkConfigProvider(BASE, respondWith(bytes, { status: 200, headers: { "content-type": "application/octet-stream" } }));
+    expect([...(await provider.getVerifierKey("registerIssuer"))]).toEqual([1, 2, 3, 4]);
+    expect(provider.firstFailure).toBeUndefined();
   });
 });

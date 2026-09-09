@@ -3,6 +3,7 @@ import { fromHex, toHex } from "@midnight-ntwrk/compact-runtime";
 import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { readableMessage } from "./describeError";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { CostModel, Transaction } from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import type { FinalizedTransaction, TransactionId } from "@midnight-ntwrk/midnight-js-protocol/ledger";
@@ -95,6 +96,44 @@ export function resolveAssetsBaseUrl(input?: string, origin?: string): string {
 }
 
 /**
+ * A {@link FetchZkConfigProvider} that remembers why a read failed.
+ *
+ * Midnight.js reads the compiled ZK assets inside an Effect, and every failure
+ * is reported as `ZKConfigurationReadError: Failed to read verifier key for
+ * <tag>#<circuit>`. The reason underneath — a 404, an SPA fallback page, a
+ * request the browser refused — never reaches the caller, so a failed deploy
+ * names the symptom and nothing else. Keeping the first one lets it say what
+ * actually broke, and the console gets the whole error either way.
+ */
+export class ReportingZkConfigProvider extends FetchZkConfigProvider<string> {
+  /** The first read that failed, phrased for an operator. */
+  firstFailure?: string;
+
+  private async keepReason<T>(asset: string, circuitId: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (error) {
+      const reason = `${asset} for ${circuitId}: ${readableMessage(error, "the request failed")}`;
+      this.firstFailure ??= reason;
+      console.error(`[ProofPass] ZK asset unreadable — ${reason}`, error);
+      throw error;
+    }
+  }
+
+  override getVerifierKey(circuitId: string) {
+    return this.keepReason("verifier key", circuitId, () => super.getVerifierKey(circuitId));
+  }
+
+  override getProverKey(circuitId: string) {
+    return this.keepReason("prover key", circuitId, () => super.getProverKey(circuitId));
+  }
+
+  override getZKIR(circuitId: string) {
+    return this.keepReason("zkir", circuitId, () => super.getZKIR(circuitId));
+  }
+}
+
+/**
  * Assembles the full provider set from a connected wallet. Every endpoint comes
  * from the wallet itself — indexer, prover and node URIs are all in
  * `getConfiguration()` — so nothing here hardcodes a network.
@@ -104,7 +143,7 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
   // Midnight.js keeps the network as global state; addresses are encoded against it.
   setNetworkId(configuration.networkId);
 
-  const zkConfigProvider = new FetchZkConfigProvider<string>(resolveAssetsBaseUrl(options.zkAssetsBaseUrl, options.origin));
+  const zkConfigProvider = new ReportingZkConfigProvider(resolveAssetsBaseUrl(options.zkAssetsBaseUrl, options.origin));
   const [proofProvider, shielded] = await Promise.all([
     dappConnectorProofProvider(api, zkConfigProvider, CostModel.initialCostModel()),
     api.getShieldedAddresses(),

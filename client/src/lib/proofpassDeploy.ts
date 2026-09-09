@@ -58,6 +58,17 @@ export async function readDustBalance(api: WalletBridgeApi) {
   return { balance, cap, hasNone: balance === 0n, registered: cap > 0n };
 }
 
+/**
+ * Effect reports every ZK asset failure as `ZKConfigurationReadError: Failed to
+ * read verifier key for proofpass#<circuit>` — once per circuit, with the reason
+ * underneath dropped. `ReportingZkConfigProvider` keeps that reason; this turns
+ * it into the one sentence worth showing.
+ */
+export function zkAssetFailureMessage(failure: string | undefined, baseUrl: string): string | null {
+  if (!failure) return null;
+  return `The compiled ZK assets could not be read — ${failure}. They are served from ${baseUrl}; run \`pnpm contracts:build\` if that path is empty.`;
+}
+
 export async function deployProofPass(api: WalletBridgeApi, options: { zkAssetsBaseUrl?: string } = {}): Promise<DeployResult> {
   const dust = await readDustBalance(api);
   if (!dust.registered) {
@@ -102,6 +113,11 @@ export async function deployProofPass(api: WalletBridgeApi, options: { zkAssetsB
       initialPrivateState: { secret: authority.secret },
     } as never) as { deployTxData: { public: { contractAddress: string } } };
   } catch (error) {
+    // The five circuits' verifier keys are read before the wallet is touched, so
+    // an unreadable asset surfaces here rather than as a wallet refusal.
+    const assetFailure = zkAssetFailureMessage(providers.zkConfigProvider.firstFailure, providers.zkConfigProvider.baseURL);
+    if (assetFailure) throw new Error(assetFailure, { cause: error });
+
     // "could not balance dust" says nothing about how short the wallet was.
     const message = readableMessage(error, "The wallet did not complete the deployment.");
     if (/insufficient|balance dust/i.test(message)) {
