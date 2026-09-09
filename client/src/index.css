@@ -136,6 +136,11 @@ kbd { border: 1px solid #d9e2e2; background: #f6f8f8; border-radius: 4px; paddin
 .button-dark { background: #1b3035; color: #eff9f7; }
 .button-dark:hover { background: #112428; }
 .button-ghost { background: transparent; border: 1px solid #d7e2e2; color: #456166; }
+/* Every workflow gates its actions with `disabled`; without this a dead control
+   looks live, and clicking it reads as an app that does not respond. */
+.button:disabled { opacity: .42; cursor: not-allowed; box-shadow: none; transform: none; }
+.button:disabled:hover { box-shadow: none; transform: none; }
+.dark .button:disabled { opacity: .34; }
 .button-ghost:hover { background: #f4f8f8; border-color: #b8d1d0; }
 .button-wide { flex: 1; }
 .hero-orbit { position: absolute; width: 264px; height: 264px; right: -9px; top: 1px; opacity: .95; z-index: 1; }
