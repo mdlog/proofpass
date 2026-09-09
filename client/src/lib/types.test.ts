@@ -5,7 +5,7 @@ import {
   isSeededRequest,
   parseRequestedAttributes,
   serverRequestId,
-  toDisplayRequest,
+  toDisplayCredential, toDisplayRequest,
   type ProofRequestView,
   type ServerProofRequest,
 } from "./types";
@@ -113,5 +113,57 @@ describe("row provenance", () => {
   it("recovers the database id only from a stored row", () => {
     expect(serverRequestId(toDisplayRequest(row({ id: 42 })))).toBe(42);
     expect(serverRequestId(seeded)).toBeNull();
+  });
+});
+
+/**
+ * A stored credential and a seeded one sit in the same grid, so the mapping has
+ * to produce the same shape and mark which is which — PRD §5, the same rule the
+ * proof-request list already follows.
+ */
+describe("toDisplayCredential", () => {
+  const row = {
+    id: 7,
+    title: "Bootcamp completion",
+    status: "active" as const,
+    issuedAt: new Date("2026-09-09T00:00:00.000Z"),
+    expiresAt: new Date("2027-09-09T00:00:00.000Z"),
+    credentialKey: "5a2707d6538212219ebf73ab9529686c769a1cb4eda1abf1884d44b80a941f0a",
+  };
+
+  it("labels a stored credential as stored, not seeded", () => {
+    expect(toDisplayCredential(row, "Northstar Academy").seeded).toBe(false);
+  });
+
+  it("names the issuer it was recorded against", () => {
+    expect(toDisplayCredential(row, "Northstar Academy").issuer).toBe("Northstar Academy");
+  });
+
+  it("says so plainly when the issuer row is gone rather than showing a blank", () => {
+    expect(toDisplayCredential(row, undefined).issuer).toBe("Unknown issuer");
+  });
+
+  it("maps the stored status to the label the filter uses", () => {
+    expect(toDisplayCredential(row, "N").status).toBe("Active");
+    expect(toDisplayCredential({ ...row, status: "expiring" }, "N").status).toBe("Expiring soon");
+    expect(toDisplayCredential({ ...row, status: "revoked" }, "N").status).toBe("Revoked");
+  });
+
+  it("shows a credential past its expiry as expiring soon, since nothing sweeps the column", () => {
+    const past = { ...row, expiresAt: new Date("2020-01-01T00:00:00.000Z") };
+    expect(toDisplayCredential(past, "N").status).toBe("Expiring soon");
+  });
+
+  it("keeps a revoked credential revoked even once expired", () => {
+    const past = { ...row, status: "revoked" as const, expiresAt: new Date("2020-01-01T00:00:00.000Z") };
+    expect(toDisplayCredential(past, "N").status).toBe("Revoked");
+  });
+
+  it("carries the commitment, which is what makes it checkable on chain", () => {
+    expect(toDisplayCredential(row, "N").credentialKey).toBe(row.credentialKey);
+  });
+
+  it("survives a credential with no expiry", () => {
+    expect(toDisplayCredential({ ...row, expiresAt: null }, "N").expires).toMatch(/no expiry/i);
   });
 });

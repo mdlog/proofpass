@@ -252,7 +252,12 @@ export function callsOf(contract: FoundProofPass): ProofPassCalls {
 
 const CREDENTIAL_DRAFT_KEY = "proofpass:credential-draft";
 
-export type CredentialDraft = { slug: string; expiresAt: bigint };
+export type CredentialDraft = {
+  slug: string;
+  expiresAt: bigint;
+  /** Metadata: the ledger stores a commitment, not a name. */
+  title: string;
+};
 
 /**
  * The issuer and the holder must agree on the expiry exactly: the commitment
@@ -262,7 +267,7 @@ export type CredentialDraft = { slug: string; expiresAt: bigint };
  */
 export function rememberCredentialDraft(draft: CredentialDraft, store: KeyValueStore = localStorage): void {
   try {
-    store.setItem(CREDENTIAL_DRAFT_KEY, JSON.stringify({ slug: draft.slug, expiresAt: draft.expiresAt.toString() }));
+    store.setItem(CREDENTIAL_DRAFT_KEY, JSON.stringify({ slug: draft.slug, expiresAt: draft.expiresAt.toString(), title: draft.title }));
   } catch {
     // Storage unavailable; the panel keeps the draft in memory for this session.
   }
@@ -272,9 +277,10 @@ export function lastCredentialDraft(store: KeyValueStore = localStorage): Creden
   try {
     const raw = store.getItem(CREDENTIAL_DRAFT_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as { slug?: string; expiresAt?: string };
+    const parsed = JSON.parse(raw) as { slug?: string; expiresAt?: string; title?: string };
     if (!parsed.slug || !parsed.expiresAt) return null;
-    return { slug: parsed.slug, expiresAt: BigInt(parsed.expiresAt) };
+    // Drafts written before titles existed simply have none.
+    return { slug: parsed.slug, expiresAt: BigInt(parsed.expiresAt), title: parsed.title ?? "" };
   } catch {
     return null;
   }

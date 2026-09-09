@@ -43,7 +43,8 @@ import { useTheme } from "../contexts/ThemeContext";
 import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, isStaleProviderError, WalletNetworkMismatchError, WalletStaleError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import { createCompactContractRequest, describeCompactIntegration, getDefaultCompactArtifactManifest, loadCompactArtifact } from "../lib/midnightContract";
 import { describeError, readableMessage } from "../lib/describeError";
-import { OnChainWorkflow } from "../components/OnChainWorkflow";
+import { OnChainWorkflow, type IssuedCredential } from "../components/OnChainWorkflow";
+import { usePersistFn } from "../hooks/usePersistFn";
 import { fetchChainTip } from "../lib/chainTip";
 import { issuerForContract, rememberDeployedContract } from "../lib/deployedContract";
 import { deployProofPass } from "../lib/proofpassDeploy";
@@ -55,7 +56,7 @@ import { RequestRow } from "../components/ProofRequestCard";
 import { StatusPill } from "../components/StatusBadge";
 import { toActivityItems, type ActivityItem } from "../lib/activity";
 import { activityItems, initialRequests } from "../lib/mock-data";
-import { CONSENT_VERSION, serverRequestId, toDisplayRequest, type CredentialStatus, type NewRequestInput, type ProofRequestView, type RequestStatus, type ServerProofRequest } from "../lib/types";
+import { CONSENT_VERSION, serverRequestId, toDisplayCredential, toDisplayRequest, type CredentialStatus, type CredentialView, type NewRequestInput, type ProofRequestView, type RequestStatus, type ServerProofRequest } from "../lib/types";
 
 type NavItem = {
   id: Workspace;
@@ -79,16 +80,7 @@ const roleNavItems: NavItem[] = [
   { id: "onchain", label: "On-chain workflow", icon: Blocks },
 ];
 
-const credentials: Array<{
-  id: string;
-  title: string;
-  issuer: string;
-  issued: string;
-  expires: string;
-  status: CredentialStatus;
-  accent: string;
-  mark: string;
-}> = [
+const seededCredentials: CredentialView[] = [
   {
     id: "cred-001",
     title: "Cybersecurity Bootcamp",
@@ -98,6 +90,7 @@ const credentials: Array<{
     status: "Active",
     accent: "teal",
     mark: "N",
+    seeded: true,
   },
   {
     id: "cred-002",
@@ -108,6 +101,7 @@ const credentials: Array<{
     status: "Expiring soon",
     accent: "coral",
     mark: "M",
+    seeded: true,
   },
   {
     id: "cred-003",
@@ -118,6 +112,7 @@ const credentials: Array<{
     status: "Active",
     accent: "violet",
     mark: "O",
+    seeded: true,
   },
   {
     id: "cred-004",
@@ -128,6 +123,7 @@ const credentials: Array<{
     status: "Revoked",
     accent: "slate",
     mark: "C",
+    seeded: true,
   },
 ];
 
@@ -294,7 +290,7 @@ function ActivityRow({ item }: { item: ActivityItem }) {
   return <div className="activity-row"><div className={`activity-icon activity-${item.type}`}><Icon size={16} /></div><div className="activity-main"><strong>{item.title}{item.seeded && <span className="demo-tag" title="Seeded demo data — not stored">Demo</span>}</strong><p>{item.detail}</p></div><span className="activity-time">{item.time}</span></div>;
 }
 
-function Credentials({ onAdd }: { onAdd: () => void }) {
+function Credentials({ onAdd, credentials }: { onAdd: () => void; credentials: CredentialView[] }) {
   const [filter, setFilter] = useState<CredentialStatus | "All">("All");
   const filtered = useMemo(() => filter === "All" ? credentials : credentials.filter((credential) => credential.status === filter), [filter]);
   return <div className="page-content"><SectionHeader eyebrow="Your credentials" title="Credentials" description="A private collection of verifiable facts, held by you." action={<button className="button button-primary" onClick={onAdd}><Plus size={16} /> Receive credential</button>} />
@@ -305,8 +301,8 @@ function Credentials({ onAdd }: { onAdd: () => void }) {
 
 function SlidersIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>; }
 
-function CredentialCard({ credential, index, onClick }: { credential: typeof credentials[number]; index: number; onClick: () => void }) {
-  return <button className={`credential-card accent-${credential.accent} animate-in`} style={{ animationDelay: `${index * 50}ms` }} onClick={onClick}><div className="credential-card-top"><div className="issuer-mark">{credential.mark}</div><StatusPill status={credential.status} /><DemoTag /><MoreHorizontal size={18} className="credential-more" /></div><div className="credential-card-content"><p className="credential-type">VERIFIABLE CREDENTIAL</p><h2>{credential.title}</h2><p className="credential-issuer">Issued by <strong>{credential.issuer}</strong></p></div><div className="credential-card-footer"><span>Issued {credential.issued}</span><span>Valid until {credential.expires}</span><ChevronRight size={16} /></div><div className="card-watermark"><Fingerprint size={96} /></div></button>;
+function CredentialCard({ credential, index, onClick }: { credential: CredentialView; index: number; onClick: () => void }) {
+  return <button className={`credential-card accent-${credential.accent} animate-in`} style={{ animationDelay: `${index * 50}ms` }} onClick={onClick}><div className="credential-card-top"><div className="issuer-mark">{credential.mark}</div><StatusPill status={credential.status} />{credential.seeded && <DemoTag />}<MoreHorizontal size={18} className="credential-more" /></div><div className="credential-card-content"><p className="credential-type">VERIFIABLE CREDENTIAL</p><h2>{credential.title}</h2><p className="credential-issuer">Issued by <strong>{credential.issuer}</strong></p></div><div className="credential-card-footer"><span>Issued {credential.issued}</span><span>Valid until {credential.expires}</span><ChevronRight size={16} /></div><div className="card-watermark"><Fingerprint size={96} /></div></button>;
 }
 
 function ProofRequests({ onApprove, requests, onCreate }: { onApprove: (id: string) => void; requests: ProofRequestView[]; onCreate: () => void }) {
@@ -670,6 +666,25 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const persistedExpiringCount = isAuthenticated && registryQuery.data ? persistedCredentials.filter((credential) => credential.status === "expiring").length : undefined;
   const persistedVerificationCount = isAuthenticated && registryQuery.data ? registryQuery.data.verifications.length : undefined;
 
+  // The panel derives the on-chain issuer id from a slug; these are the rows
+  // that slug can name, so a credential lands against a real registry issuer.
+  // Stored credentials lead and the seeded set stays behind them wearing a Demo
+  // label, the same order the proof-request list uses.
+  const allCredentials = useMemo(() => {
+    const issuerName = new Map((registryQuery.data?.issuers ?? []).map((issuer) => [issuer.id, issuer.displayName]));
+    const stored = (registryQuery.data?.credentials ?? []).map((row) => toDisplayCredential(row, issuerName.get(row.issuerId)));
+    return [...stored, ...seededCredentials];
+  }, [registryQuery.data]);
+
+  const registryIssuers = useMemo(
+    () => (registryQuery.data?.issuers ?? []).map((issuer) => ({ id: issuer.id, slug: issuer.slug, displayName: issuer.displayName })),
+    [registryQuery.data],
+  );
+  const issueCredential = trpc.credential.issue.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
+  const revokeCredential = trpc.credential.revoke.useMutation({ onSuccess: () => { void registryQuery.refetch(); } });
+  const issueCredentialRecord = usePersistFn(async (credential: IssuedCredential) => { await issueCredential.mutateAsync(credential); });
+  const revokeCredentialRecord = usePersistFn(async (credentialKey: string) => { await revokeCredential.mutateAsync({ credentialKey }); });
+
   // The hero used to print an invented block height. Every endpoint comes from
   // the wallet, so with none connected there is no indexer to ask and the block
   // line is simply absent.
@@ -689,5 +704,5 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   };
 
 
-  return <div className="app-shell"><div className={`sidebar-wrap ${mobileOpen ? "sidebar-wrap-open" : ""}`}><Sidebar workspace={workspace} onWorkspaceChange={onWorkspaceChange} onClose={() => setMobileOpen(false)} accountName={user ? (user.name?.trim() || user.openId) : null} counts={navCounts} /></div><div className="app-main"><Topbar workspace={workspace} onOpenMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} walletSession={walletSession} walletCount={wallets.length} onConnect={openWalletPicker} /><div className="mobile-page-title"><span>{pageTitle[workspace]}</span><div className="mobile-status"><span className="network-pulse" /> {walletSession ? "Connected" : "Demo"}</div></div>{workspace === "overview" && <Overview onWorkspaceChange={onWorkspaceChange} onApprove={approveRequest} requests={allRequests} activity={activity} walletSession={walletSession} metrics={{ credentials: persistedCredentialCount, activeCredentials: persistedActiveCredentialCount, proofsShared: persistedVerificationCount }} chainHeight={chainHeight} />}{workspace === "credentials" && <Credentials onAdd={() => toast("Receive credential", { description: "Your issuer invite link will appear here." })} />}{workspace === "requests" && <ProofRequests onApprove={approveRequest} requests={allRequests} onCreate={openCreateRequest} />}{workspace === "activity" && <ActivityPage activity={activity} />}{workspace === "issuer" && <IssuerWorkspace walletSession={walletSession} onConnect={openWalletPicker} onRegisterIssuer={registerIssuer} onDeployContract={deployContract} deploying={deployingContract} credentialCount={persistedCredentialCount} activeCredentialCount={persistedActiveCredentialCount} revokedCount={persistedRevokedCount} expiringCount={persistedExpiringCount} artifactReady={Boolean(contractStatusQuery.data?.configured && contractStatusQuery.data.moduleAvailable && contractStatusQuery.data.assetsAvailable)} />}{workspace === "verifier" && <VerifierWorkspace walletSession={walletSession} onConnect={openWalletPicker} onCreateRequest={openCreateRequest} />}{workspace === "onchain" && <OnChainWorkflow walletSession={walletSession} onConnect={openWalletPicker} />}{workspace === "settings" && <Settings />}</div>{activeRequest && <ApprovalModal request={activeRequest} onClose={() => setActiveRequest(null)} onApprove={resolveApproval} onDecline={resolveDecline} isBusy={resolvingRequest} />}{searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={onWorkspaceChange} />}{walletPickerOpen && <WalletPickerModal wallets={wallets} incompatible={walletScan.incompatible} foreign={foreignWallets} network={targetNetwork} onNetworkChange={(next) => { setTargetNetwork(next); setStoredNetwork(next); }} onClose={() => setWalletPickerOpen(false)} onSelect={connectWallet} isConnecting={connectingWallet} />}{createRequestOpen && <CreateRequestModal onClose={() => setCreateRequestOpen(false)} onSubmit={submitCreateRequest} isSaving={createProofRequest.isPending} />}</div>;
+  return <div className="app-shell"><div className={`sidebar-wrap ${mobileOpen ? "sidebar-wrap-open" : ""}`}><Sidebar workspace={workspace} onWorkspaceChange={onWorkspaceChange} onClose={() => setMobileOpen(false)} accountName={user ? (user.name?.trim() || user.openId) : null} counts={navCounts} /></div><div className="app-main"><Topbar workspace={workspace} onOpenMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} walletSession={walletSession} walletCount={wallets.length} onConnect={openWalletPicker} /><div className="mobile-page-title"><span>{pageTitle[workspace]}</span><div className="mobile-status"><span className="network-pulse" /> {walletSession ? "Connected" : "Demo"}</div></div>{workspace === "overview" && <Overview onWorkspaceChange={onWorkspaceChange} onApprove={approveRequest} requests={allRequests} activity={activity} walletSession={walletSession} metrics={{ credentials: persistedCredentialCount, activeCredentials: persistedActiveCredentialCount, proofsShared: persistedVerificationCount }} chainHeight={chainHeight} />}{workspace === "credentials" && <Credentials credentials={allCredentials} onAdd={() => toast("Receive credential", { description: "Your issuer invite link will appear here." })} />}{workspace === "requests" && <ProofRequests onApprove={approveRequest} requests={allRequests} onCreate={openCreateRequest} />}{workspace === "activity" && <ActivityPage activity={activity} />}{workspace === "issuer" && <IssuerWorkspace walletSession={walletSession} onConnect={openWalletPicker} onRegisterIssuer={registerIssuer} onDeployContract={deployContract} deploying={deployingContract} credentialCount={persistedCredentialCount} activeCredentialCount={persistedActiveCredentialCount} revokedCount={persistedRevokedCount} expiringCount={persistedExpiringCount} artifactReady={Boolean(contractStatusQuery.data?.configured && contractStatusQuery.data.moduleAvailable && contractStatusQuery.data.assetsAvailable)} />}{workspace === "verifier" && <VerifierWorkspace walletSession={walletSession} onConnect={openWalletPicker} onCreateRequest={openCreateRequest} />}{workspace === "onchain" && <OnChainWorkflow walletSession={walletSession} onConnect={openWalletPicker} issuers={registryIssuers} onCredentialIssued={issueCredentialRecord} onCredentialRevoked={revokeCredentialRecord} />}{workspace === "settings" && <Settings />}</div>{activeRequest && <ApprovalModal request={activeRequest} onClose={() => setActiveRequest(null)} onApprove={resolveApproval} onDecline={resolveDecline} isBusy={resolvingRequest} />}{searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} onNavigate={onWorkspaceChange} />}{walletPickerOpen && <WalletPickerModal wallets={wallets} incompatible={walletScan.incompatible} foreign={foreignWallets} network={targetNetwork} onNetworkChange={(next) => { setTargetNetwork(next); setStoredNetwork(next); }} onClose={() => setWalletPickerOpen(false)} onSelect={connectWallet} isConnecting={connectingWallet} />}{createRequestOpen && <CreateRequestModal onClose={() => setCreateRequestOpen(false)} onSubmit={submitCreateRequest} isSaving={createProofRequest.isPending} />}</div>;
 }

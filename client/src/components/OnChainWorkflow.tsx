@@ -5,7 +5,7 @@ import { lastDeployedContract } from "../lib/deployedContract";
 import { describeError, readableMessage } from "../lib/describeError";
 import { bytesToHex } from "../lib/hex";
 import { buildMidnightProviders, resolveProofServerUri } from "../lib/midnightProviders";
-import type { MidnightWalletSession } from "../lib/midnightWallet";
+import { isMidnightNetwork, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
   dustBlocker, fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
@@ -36,9 +36,27 @@ const STEPS: { id: WorkflowStep; label: string; role: ContractRole; hint: string
 
 const short = (hex: string) => hex.length > 20 ? `${hex.slice(0, 10)}…${hex.slice(-6)}` : hex;
 
-export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: MidnightWalletSession | null; onConnect: () => void }) {
+export type RegistryIssuer = { id: number; slug: string; displayName: string };
+
+export type IssuedCredential = {
+  issuerId: number;
+  credentialKey: string;
+  title: string;
+  subjectCommitment: string;
+  contractAddress: string;
+  networkId: MidnightNetwork;
+  expiresAt: Date;
+};
+
+export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentialIssued, onCredentialRevoked }: {
+  walletSession: MidnightWalletSession | null;
+  onConnect: () => void;
+  issuers: RegistryIssuer[];
+  onCredentialIssued: (credential: IssuedCredential) => Promise<void>;
+  onCredentialRevoked: (credentialKey: string) => Promise<void>;
+}) {
   const [address, setAddress] = useState(() => lastDeployedContract()?.contractAddress ?? "");
-  const [draft, setDraft] = useState<CredentialDraft>(() => lastCredentialDraft() ?? { slug: "northstar-academy", expiresAt: expirySecondsFromNow(3600) });
+  const [draft, setDraft] = useState<CredentialDraft>(() => lastCredentialDraft() ?? { slug: "northstar-academy", expiresAt: expirySecondsFromNow(3600), title: "Bootcamp completion" });
   const [identity, setIdentity] = useState<{ issuerId: Uint8Array; commitment: Uint8Array } | null>(null);
   const [identityError, setIdentityError] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<LedgerSnapshot | null>(null);
@@ -62,11 +80,15 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     return () => { current = false; };
   }, [draft]);
 
-  const startDraft = (slug: string) => {
-    const next = { slug, expiresAt: expirySecondsFromNow(3600) };
+  /** A new credential: a fresh expiry, which is a fresh commitment. */
+  const startDraft = (slug: string, title = draft.title) => {
+    const next = { slug, title, expiresAt: expirySecondsFromNow(3600) };
     rememberCredentialDraft(next);
     setDraft(next);
   };
+
+  /** The same slug the on-chain id is derived from, as a row in the registry. */
+  const registryIssuer = issuers.find((issuer) => issuer.slug === draft.slug);
 
   const ensureProviders = useCallback(async () => {
     if (!walletSession) throw new Error("Connect a Midnight wallet first.");
@@ -92,6 +114,48 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     }
   };
 
+  /**
+   * The registry half. It is deliberately not allowed to fail the step: the
+   * commitment is already on the ledger by the time this runs, and reporting the
+   * transaction as failed because a row did not save would be a lie.
+   */
+  const recordIssued = async (commitment: string) => {
+    if (!registryIssuer) {
+      toast("Credential not recorded", { description: `No registry issuer with the slug "${draft.slug}" — sign in and register one to keep credentials.` });
+      return;
+    }
+    // The row names the network the commitment lives on; a wallet reporting one
+    // this build does not know is not something to guess about.
+    const network = walletSession?.configuration?.networkId;
+    if (!network || !isMidnightNetwork(network)) {
+      toast("Credential not recorded", { description: `The wallet reports network "${network ?? "none"}", which this build does not recognise.` });
+      return;
+    }
+    try {
+      await onCredentialIssued({
+        issuerId: registryIssuer.id,
+        credentialKey: commitment,
+        title: draft.title.trim() || "Credential",
+        subjectCommitment: commitment,
+        contractAddress: address.trim(),
+        networkId: network,
+        expiresAt: new Date(Number(draft.expiresAt) * 1000),
+      });
+      toast.success("Credential recorded", { description: `${draft.title.trim() || "Credential"} is now in your registry.` });
+    } catch (error) {
+      toast.error("Credential not recorded", { description: readableMessage(error, "The registry write failed; the commitment is on chain regardless.") });
+    }
+  };
+
+  const recordRevoked = async (commitment: string) => {
+    if (!registryIssuer) return;
+    try {
+      await onCredentialRevoked(commitment);
+    } catch (error) {
+      toast.error("Registry still shows the credential", { description: readableMessage(error, "The ledger revoked it; the row did not follow.") });
+    }
+  };
+
   const runStep = async (step: WorkflowStep) => {
     if (!identity) return;
     const { role } = STEPS.find((entry) => entry.id === step)!;
@@ -107,9 +171,15 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
       const secret = role === "holder" ? resolveHolderSecret().secret : resolveAuthoritySecret().secret;
       const calls = callsOf(await connectProofPass(providers, address.trim(), role, secret));
       if (step === "register") await calls.registerIssuer(identity.issuerId);
-      if (step === "issue") await calls.issueCredential(identity.issuerId, identity.commitment);
+      if (step === "issue") {
+        await calls.issueCredential(identity.issuerId, identity.commitment);
+        await recordIssued(bytesToHex(identity.commitment));
+      }
       if (step === "prove") await calls.proveEligibility(identity.issuerId, draft.expiresAt, freshNonce());
-      if (step === "revoke") await calls.revokeCredential(identity.commitment);
+      if (step === "revoke") {
+        await calls.revokeCredential(identity.commitment);
+        await recordRevoked(bytesToHex(identity.commitment));
+      }
       toast.success(`${STEPS.find((entry) => entry.id === step)!.label} accepted`, { description: "Reading the ledger back…" });
       await readLedger(providers);
     } catch (error) {
@@ -146,7 +216,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Deployed contract</p><h2>Contract under test</h2></div><Blocks size={19} className="muted-icon" /></div>
       <label className="request-field"><span>Contract address</span><input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="0200…" spellCheck={false} /></label>
-      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} /></label>
+      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} list="registry-issuer-slugs" /><datalist id="registry-issuer-slugs">{issuers.map((issuer) => <option key={issuer.id} value={issuer.slug}>{issuer.displayName}</option>)}</datalist><small>{registryIssuer ? `Registry: ${registryIssuer.displayName} — credentials will be recorded against it.` : "Registry: no issuer with this slug. The workflow still runs; the credential is not recorded."}</small></label><label className="request-field"><span>Credential title — metadata, never on the ledger</span><input value={draft.title} onChange={(event) => { const next = { ...draft, title: event.target.value }; rememberCredentialDraft(next); setDraft(next); }} spellCheck={false} /></label>
       <div className="role-control-list">
         <div><span>Issuer id</span><strong>{identity ? short(bytesToHex(identity.issuerId)) : "—"}</strong></div>
         <div><span>Commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>

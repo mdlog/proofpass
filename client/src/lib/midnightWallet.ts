@@ -16,7 +16,7 @@ const NETWORK_LABELS: Record<MidnightNetwork, string> = {
   preprod: "Midnight preprod",
 };
 
-function isMidnightNetwork(value: string): value is MidnightNetwork {
+export function isMidnightNetwork(value: string): value is MidnightNetwork {
   return (MIDNIGHT_NETWORKS as readonly string[]).includes(value);
 }
 

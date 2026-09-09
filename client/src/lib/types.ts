@@ -95,3 +95,64 @@ export function serverRequestId(request: ProofRequestView) {
   const parsed = Number(request.id.slice(3));
   return request.id.startsWith("db-") && Number.isFinite(parsed) ? parsed : null;
 }
+
+/** One credential as the UI renders it, whatever its origin. */
+export type CredentialView = {
+  id: string;
+  title: string;
+  issuer: string;
+  issued: string;
+  expires: string;
+  status: CredentialStatus;
+  accent: string;
+  mark: string;
+  /** The commitment, which is what makes the credential checkable on chain. */
+  credentialKey?: string;
+  seeded: boolean;
+};
+
+type StoredCredential = {
+  id: number;
+  title: string;
+  status: "active" | "expiring" | "revoked";
+  issuedAt: Date | string;
+  expiresAt: Date | string | null;
+  credentialKey: string;
+};
+
+const STORED_CREDENTIAL_LABEL: Record<StoredCredential["status"], CredentialStatus> = {
+  active: "Active",
+  expiring: "Expiring soon",
+  revoked: "Revoked",
+};
+
+const day = (value: Date | string | null) =>
+  value === null ? "no expiry" : new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+/**
+ * A stored credential in the shape the grid renders, marked as stored so it
+ * sits unlabelled beside seeded ones (PRD §5).
+ *
+ * The issuer name comes from the registry rather than the credential: the row
+ * holds only a foreign key, and a credential whose issuer has gone says so
+ * instead of rendering an empty byline.
+ */
+export function toDisplayCredential(row: StoredCredential, issuerName: string | undefined): CredentialView {
+  // Nothing sweeps the status column, so an expiry that has passed is reported
+  // as expiring rather than left claiming to be active. Revocation is one way
+  // and outranks it.
+  const stored = STORED_CREDENTIAL_LABEL[row.status] ?? "Active";
+  const expired = row.expiresAt !== null && new Date(row.expiresAt).getTime() <= Date.now();
+  return {
+    id: `stored-${row.id}`,
+    title: row.title,
+    issuer: issuerName?.trim() || "Unknown issuer",
+    issued: day(row.issuedAt),
+    expires: day(row.expiresAt),
+    status: stored === "Revoked" ? "Revoked" : expired ? "Expiring soon" : stored,
+    accent: "teal",
+    mark: (issuerName?.trim() || "?").slice(0, 2).toUpperCase(),
+    credentialKey: row.credentialKey,
+    seeded: false,
+  };
+}

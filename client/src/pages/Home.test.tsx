@@ -90,6 +90,17 @@ describe("Overview metrics", () => {
   });
 });
 
+describe("Credentials page", () => {
+  it("still labels the seeded cards, which is the whole point of keeping them", async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Credentials/ }));
+    const cards = screen.getAllByRole("button").filter((button) => /VERIFIABLE CREDENTIAL/.test(button.textContent ?? ""));
+    expect(cards.length).toBeGreaterThan(0);
+    // With no session nothing is stored, so every card on screen is seeded.
+    for (const card of cards) expect(card.textContent).toMatch(/Demo/);
+  });
+});
+
 describe("workspace navigation", () => {
   /**
    * The breadcrumb was hardcoded to "Overview", so every page claimed to be a

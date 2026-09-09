@@ -305,13 +305,25 @@ describe("credential draft", () => {
 
   it("reads back the exact expiry that was issued", () => {
     const kept = store();
-    rememberCredentialDraft({ slug: "northstar", expiresAt: 1_800_000_000n }, kept);
-    expect(lastCredentialDraft(kept)).toEqual({ slug: "northstar", expiresAt: 1_800_000_000n });
+    rememberCredentialDraft({ slug: "northstar", expiresAt: 1_800_000_000n, title: "Bootcamp" }, kept);
+    expect(lastCredentialDraft(kept)).toEqual({ slug: "northstar", expiresAt: 1_800_000_000n, title: "Bootcamp" });
+  });
+
+  it("keeps the title, which the ledger never sees but the registry needs", () => {
+    const kept = store();
+    rememberCredentialDraft({ slug: "s", expiresAt: 1n, title: "Cybersecurity Bootcamp" }, kept);
+    expect(lastCredentialDraft(kept)?.title).toBe("Cybersecurity Bootcamp");
+  });
+
+  it("survives a draft written before titles existed", () => {
+    const kept = store();
+    kept.setItem("proofpass:credential-draft", JSON.stringify({ slug: "s", expiresAt: "1" }));
+    expect(lastCredentialDraft(kept)).toEqual({ slug: "s", expiresAt: 1n, title: "" });
   });
 
   it("survives the JSON round trip a bigint does not make on its own", () => {
     const kept = store();
-    rememberCredentialDraft({ slug: "s", expiresAt: 9_007_199_254_740_993n }, kept);
+    rememberCredentialDraft({ slug: "s", expiresAt: 9_007_199_254_740_993n, title: "t" }, kept);
     expect(lastCredentialDraft(kept)?.expiresAt).toBe(9_007_199_254_740_993n);
   });
 
