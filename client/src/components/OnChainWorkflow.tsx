@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { lastDeployedContract } from "../lib/deployedContract";
 import { describeError, readableMessage } from "../lib/describeError";
 import { bytesToHex } from "../lib/hex";
-import { buildMidnightProviders } from "../lib/midnightProviders";
+import { buildMidnightProviders, resolveProofServerUri } from "../lib/midnightProviders";
 import type { MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
@@ -152,7 +152,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
 
     <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Wallet endpoints</p><h2>Where this proves and reads</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
-      <div className="role-control-list">{walletEndpoints(walletSession?.configuration).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}</div>
+      <div className="role-control-list">{walletEndpoints(walletSession?.configuration, resolveProofServerUri()).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}</div>
       <p className="modal-note">Proving runs inside the wallet against its own prover — a step that fails with "Failed to fetch" failed to reach one of these.</p>
     </section>
 

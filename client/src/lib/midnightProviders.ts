@@ -1,6 +1,7 @@
 import type { WalletConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import { fromHex, toHex } from "@midnight-ntwrk/compact-runtime";
 import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
+import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
@@ -75,7 +76,24 @@ export type ProviderBundleOptions = {
   zkAssetsBaseUrl?: string;
   /** Overridable so the resolution can be tested without a browser. */
   origin?: string;
+  /** A proof server to use instead of the wallet's own. */
+  proofServerUri?: string;
 };
+
+/**
+ * The proof server the app proves against, or null to use the wallet's.
+ *
+ * The hosted preprod prover sits behind a proxy that refuses request bodies
+ * over a few kilobytes, while a circuit call has to upload a 2.7 MB proving
+ * key — so every call fails there as an unexplained "Failed to fetch". Pointing
+ * at a proof server of one's own is the way past it, and running that server
+ * locally is also what keeps the proof preimage — which carries the witness —
+ * on the same machine.
+ */
+export function resolveProofServerUri(input?: string): string | null {
+  const configured = (input ?? (import.meta.env.VITE_PROOF_SERVER_URI as string | undefined))?.trim();
+  return configured || null;
+}
 
 /** Where `pnpm contracts:build` publishes `keys/` and `zkir/`. */
 export const DEFAULT_ZK_ASSETS_PATH = "/compact/proofpass";
@@ -225,11 +243,14 @@ export function createPrivateStateProvider(accountId: string, store?: KeyValueSt
  * `getConfiguration()` — so nothing here hardcodes a network.
  */
 export async function buildMidnightProviders(api: WalletBridgeApi, options: ProviderBundleOptions = {}) {
-  // Proving happens in the wallet, never here (ARCHITECTURE §18), so a connector
-  // that predates `getProvingProvider` cannot deploy at all. Unguarded it fails
-  // deep in the SDK as "api.getProvingProvider is not a function", which reads
-  // like an app bug rather than an out-of-date wallet.
-  if (typeof api.getProvingProvider !== "function") {
+  const proofServerUri = resolveProofServerUri(options.proofServerUri);
+
+  // Proving normally happens in the wallet (ARCHITECTURE §18), so a connector
+  // that predates `getProvingProvider` cannot transact at all. Unguarded it
+  // fails deep in the SDK as "api.getProvingProvider is not a function", which
+  // reads like an app bug rather than an out-of-date wallet. A configured proof
+  // server does the proving instead, and then the wallet needs no prover.
+  if (!proofServerUri && typeof api.getProvingProvider !== "function") {
     throw new Error("This wallet cannot prove: it does not expose getProvingProvider, which version 4 of the Midnight DApp Connector API requires. Update the wallet extension to a build that implements it.");
   }
 
@@ -239,7 +260,9 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
 
   const zkConfigProvider = new ReportingZkConfigProvider(resolveAssetsBaseUrl(options.zkAssetsBaseUrl, options.origin));
   const [proofProvider, shielded] = await Promise.all([
-    dappConnectorProofProvider(api, zkConfigProvider, CostModel.initialCostModel()),
+    proofServerUri
+      ? httpClientProofProvider(proofServerUri, zkConfigProvider)
+      : dappConnectorProofProvider(api, zkConfigProvider, CostModel.initialCostModel()),
     api.getShieldedAddresses(),
   ]);
 
@@ -247,6 +270,7 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
 
   return {
     configuration,
+    proofServerUri,
     zkConfigProvider,
     proofProvider,
     publicDataProvider: indexerPublicDataProvider(configuration.indexerUri, configuration.indexerWsUri),

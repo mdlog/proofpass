@@ -380,4 +380,10 @@ describe("walletEndpoints", () => {
   it("still lists every endpoint when the wallet gave no configuration at all", () => {
     expect(walletEndpoints(undefined)).toHaveLength(4);
   });
+
+  it("names the app's own prover when it overrides the wallet's, so the row is not a lie", () => {
+    const rows = walletEndpoints(full, "http://localhost:6300");
+    expect(rows).toContainEqual({ label: "Prover", value: "http://localhost:6300 (app override)" });
+    expect(rows).not.toContainEqual({ label: "Prover", value: "http://127.0.0.1:6300" });
+  });
 });

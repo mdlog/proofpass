@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildMidnightProviders, createPrivateStateProvider, createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, resolvePrivateStatePassword, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
+import { buildMidnightProviders, createPrivateStateProvider, createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, resolvePrivateStatePassword, resolveProofServerUri, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
 
 /**
  * The bridge is pure representation-shuffling between Midnight.js and the DApp
@@ -187,11 +187,22 @@ describe("ReportingZkConfigProvider", () => {
  */
 describe("buildMidnightProviders wallet capabilities", () => {
   it("names the missing capability rather than failing inside the SDK", async () => {
-    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi)).rejects.toThrow(/getProvingProvider/);
+    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi, { proofServerUri: "" })).rejects.toThrow(/getProvingProvider/);
   });
 
   it("says which connector version requires it, so the fix is to update the wallet", async () => {
-    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi)).rejects.toThrow(/DApp Connector/);
+    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi, { proofServerUri: "" })).rejects.toThrow(/DApp Connector/);
+  });
+
+  /**
+   * The hosted preprod prover sits behind a proxy that refuses request bodies
+   * over a few kilobytes, and a circuit call has to upload a 2.7 MB proving key.
+   * Pointing the app at a proof server of its own is the way past that, and a
+   * wallet that cannot prove is then no obstacle.
+   */
+  it("does not demand a wallet prover when the app brings its own proof server", async () => {
+    const api = { getConfiguration: async () => { throw new Error("reached getConfiguration"); } } as unknown as WalletBridgeApi;
+    await expect(buildMidnightProviders(api, { proofServerUri: "http://localhost:6300" })).rejects.toThrow(/reached getConfiguration/);
   });
 
   it("lets a wallet that exposes it through to the rest of the setup", async () => {
@@ -324,5 +335,30 @@ describe("private state", () => {
 
   it("refuses to build without a wallet account, so two wallets cannot share a store", () => {
     expect(() => createPrivateStateProvider("", fakeStore())).toThrow(/accountId/);
+  });
+});
+
+
+describe("resolveProofServerUri", () => {
+  /**
+   * Explicit over ambient: reading the environment here would make the result
+   * depend on whoever's .env is on disk, which is how a test starts passing
+   * for the wrong reason.
+   */
+  it("reports none for an empty setting, so the wallet's prover is used", () => {
+    expect(resolveProofServerUri("")).toBeNull();
+  });
+
+  it("ignores whitespace rather than building a provider from a blank string", () => {
+    expect(resolveProofServerUri("   ")).toBeNull();
+  });
+
+  it("takes the configured server, trimmed", () => {
+    expect(resolveProofServerUri("  http://localhost:6300  ")).toBe("http://localhost:6300");
+  });
+
+  it("lets an explicit setting win over the environment, in either direction", () => {
+    expect(resolveProofServerUri("http://elsewhere:6300")).toBe("http://elsewhere:6300");
+    expect(resolveProofServerUri("")).toBeNull();
   });
 });

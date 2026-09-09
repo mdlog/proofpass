@@ -304,11 +304,14 @@ export type WalletConfiguration = { networkId?: string; indexerUri?: string; pro
  * rendered as a blank row, because "the wallet did not report a prover" and
  * "the prover is unreachable" call for different fixes.
  */
-export function walletEndpoints(configuration?: WalletConfiguration): { label: string; value: string }[] {
+export function walletEndpoints(configuration?: WalletConfiguration, proofServerOverride?: string | null): { label: string; value: string }[] {
   const value = (raw?: string) => raw?.trim() || "not reported";
+  const prover = proofServerOverride?.trim()
+    ? `${proofServerOverride.trim()} (app override)`
+    : value(configuration?.proverServerUri);
   return [
     { label: "Network", value: value(configuration?.networkId) },
-    { label: "Prover", value: value(configuration?.proverServerUri) },
+    { label: "Prover", value: prover },
     { label: "Indexer", value: value(configuration?.indexerUri) },
     { label: "Node", value: value(configuration?.substrateNodeUri) },
   ];
