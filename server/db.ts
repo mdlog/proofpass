@@ -85,6 +85,43 @@ export async function updateIssuerContract(userId: number, issuerId: number, con
   return updated[0];
 }
 
+/**
+ * The metadata half of an on-chain credential: the ledger holds the commitment,
+ * this holds the title, issuer and expiry that make it readable. Scoped twice —
+ * the issuer must belong to the caller, and the row is held by the caller — so a
+ * credential cannot be attributed to an issuer someone else owns.
+ */
+export async function createCredential(userId: number, input: {
+  issuerId: number;
+  credentialKey: string;
+  title: string;
+  subjectCommitment?: string;
+  contractAddress?: string;
+  networkId: string;
+  expiresAt?: Date;
+  holderWalletAddress?: string;
+}) {
+  const db = requireDb(await getDb());
+  const [issuer] = await db.select().from(issuers).where(and(eq(issuers.id, input.issuerId), eq(issuers.ownerUserId, userId))).limit(1);
+  if (!issuer) throw new Error("Issuer not found for this account");
+  // `credentialKey` is the commitment, and the ledger will not accept the same
+  // one twice either — so the friendlier message comes before the constraint.
+  const [existing] = await db.select().from(credentials).where(eq(credentials.credentialKey, input.credentialKey)).limit(1);
+  if (existing) throw new Error("Credential already recorded");
+  await db.insert(credentials).values({ ...input, holderUserId: userId });
+  const [created] = await db.select().from(credentials).where(eq(credentials.credentialKey, input.credentialKey)).limit(1);
+  return created;
+}
+
+/** Revocation is one way on the ledger, and one way here. */
+export async function revokeStoredCredential(userId: number, credentialKey: string) {
+  const db = requireDb(await getDb());
+  const where = and(eq(credentials.credentialKey, credentialKey), eq(credentials.holderUserId, userId));
+  await db.update(credentials).set({ status: "revoked" }).where(where);
+  const [row] = await db.select().from(credentials).where(where).limit(1);
+  return row;
+}
+
 export async function saveWalletConnection(userId: number, input: Omit<InsertWalletConnection, "userId">) {
   const db = requireDb(await getDb());
   const existing = await db.select().from(walletConnections).where(and(eq(walletConnections.userId, userId), eq(walletConnections.providerId, input.providerId), eq(walletConnections.walletAddress, input.walletAddress))).limit(1);

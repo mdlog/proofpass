@@ -4,10 +4,12 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
+  createCredential,
   createIssuer,
   createProofRequest,
   listIssuerRegistry,
   recordVerification,
+  revokeStoredCredential,
   saveWalletConnection,
   setProofRequestStatus,
   updateIssuerContract,
@@ -41,6 +43,25 @@ export const appRouter = router({
     attachContract: protectedProcedure
       .input(z.object({ issuerId: z.number().int().positive(), contractAddress: z.string().trim().min(10).max(180) }))
       .mutation(({ ctx, input }) => updateIssuerContract(ctx.user.id, input.issuerId, input.contractAddress)),
+  }),
+
+  credential: router({
+    issue: protectedProcedure
+      .input(z.object({
+        issuerId: z.number().int().positive(),
+        // The commitment: 32 bytes of hex, and unique on the ledger too.
+        credentialKey: z.string().trim().min(32).max(180),
+        title: z.string().trim().min(1).max(180),
+        subjectCommitment: z.string().trim().max(220).optional(),
+        contractAddress: z.string().trim().max(180).optional(),
+        networkId,
+        expiresAt: z.date().optional(),
+        holderWalletAddress: z.string().trim().max(220).optional(),
+      }))
+      .mutation(({ ctx, input }) => createCredential(ctx.user.id, input)),
+    revoke: protectedProcedure
+      .input(z.object({ credentialKey: z.string().trim().min(32).max(180) }))
+      .mutation(({ ctx, input }) => revokeStoredCredential(ctx.user.id, input.credentialKey)),
   }),
 
   wallet: router({

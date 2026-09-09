@@ -11,11 +11,11 @@ import type { TrpcContext } from "./_core/context";
  * contracts, and the wiring between them.
  */
 const store = vi.hoisted(() => {
-  const state = { issuers: [] as any[], proofRequests: [] as any[], verifications: [] as any[], wallets: [] as any[], nextId: 1 };
+  const state = { issuers: [] as any[], credentials: [] as any[], proofRequests: [] as any[], verifications: [] as any[], wallets: [] as any[], nextId: 1 };
   return {
     state,
     reset() {
-      state.issuers = []; state.proofRequests = []; state.verifications = []; state.wallets = []; state.nextId = 1;
+      state.issuers = []; state.credentials = []; state.proofRequests = []; state.verifications = []; state.wallets = []; state.nextId = 1;
     },
   };
 });
@@ -52,9 +52,25 @@ vi.mock("./db", () => ({
     store.state.wallets.push(row);
     return row;
   },
+  // Mirrors the real insert: the issuer must belong to the caller, and
+  // credentialKey is unique across the table.
+  createCredential: async (userId: number, input: any) => {
+    const issuer = store.state.issuers.find(i => i.id === input.issuerId && i.ownerUserId === userId);
+    if (!issuer) throw new Error("Issuer not found for this account");
+    if (store.state.credentials.some(c => c.credentialKey === input.credentialKey)) throw new Error("Credential already recorded");
+    const row = { id: store.state.nextId++, holderUserId: userId, status: "active", ...input };
+    store.state.credentials.push(row);
+    return row;
+  },
+  // Mirrors the real WHERE: credentialKey AND holderUserId = caller.
+  revokeStoredCredential: async (userId: number, credentialKey: string) => {
+    const row = store.state.credentials.find(c => c.credentialKey === credentialKey && c.holderUserId === userId);
+    if (row) row.status = "revoked";
+    return row;
+  },
   listIssuerRegistry: async (userId: number) => ({
     issuers: store.state.issuers.filter(i => i.ownerUserId === userId),
-    credentials: [],
+    credentials: store.state.credentials.filter(c => c.holderUserId === userId),
     wallets: store.state.wallets.filter(w => w.userId === userId),
     proofRequests: store.state.proofRequests.filter(r => r.requesterUserId === userId || r.holderUserId === userId),
     verifications: store.state.verifications.filter(v => v.verifierUserId === userId || v.holderUserId === userId),
@@ -96,6 +112,8 @@ describe("authentication gate", () => {
     await expect(anon.proofRequests.approve({ requestId: 1 })).rejects.toThrow(/Please login/);
     await expect(anon.proofRequests.decline({ requestId: 1 })).rejects.toThrow(/Please login/);
     await expect(anon.issuer.registry()).rejects.toThrow(/Please login/);
+    await expect(anon.credential.issue({ issuerId: 1, credentialKey: "c".repeat(64), title: "Bootcamp", networkId: "preprod" })).rejects.toThrow(/Please login/);
+    await expect(anon.credential.revoke({ credentialKey: "c".repeat(64) })).rejects.toThrow(/Please login/);
     await expect(anon.wallet.saveConnection({ providerId: "lace", providerName: "lace", walletAddress: "mn_addr_x".padEnd(12, "y"), networkId: "preprod" }))
       .rejects.toThrow(/Please login/);
   });
@@ -182,5 +200,68 @@ describe("proof request lifecycle", () => {
   it("scopes the registry to the caller", async () => {
     await caller(holder).proofRequests.create({ ...REQUEST, holderUserId: holder.id });
     expect((await caller(user(3)).issuer.registry()).proofRequests).toHaveLength(0);
+  });
+});
+
+
+/**
+ * A credential row is the metadata half of an on-chain commitment: the ledger
+ * holds the commitment, this holds the title, issuer and expiry that make it
+ * readable. Nothing wrote to the table before, so the whole path is new.
+ */
+describe("credential records", () => {
+  const holder = user(1);
+  const stranger = user(2);
+  const COMMITMENT = "5a2707d6538212219ebf73ab9529686c769a1cb4eda1abf1884d44b80a941f0a";
+
+  async function withIssuer(as = holder) {
+    const issuer = await caller(as).issuer.create({ slug: "northstar-academy", displayName: "Northstar Academy", networkId: "preprod" });
+    return (issuer as { id: number }).id;
+  }
+
+  it("records a credential against an issuer the caller owns", async () => {
+    const issuerId = await withIssuer();
+    const row = await caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp completion", subjectCommitment: COMMITMENT, networkId: "preprod" });
+    expect(row).toMatchObject({ holderUserId: holder.id, credentialKey: COMMITMENT, status: "active" });
+  });
+
+  it("refuses to record against someone else's issuer", async () => {
+    const issuerId = await withIssuer();
+    await expect(caller(stranger).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp", networkId: "preprod" }))
+      .rejects.toThrow(/Issuer not found/);
+  });
+
+  it("refuses the same commitment twice, as the ledger does", async () => {
+    const issuerId = await withIssuer();
+    await caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp", networkId: "preprod" });
+    await expect(caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp again", networkId: "preprod" }))
+      .rejects.toThrow(/already recorded/);
+  });
+
+  it("shows the credential in the caller's own registry and nobody else's", async () => {
+    const issuerId = await withIssuer();
+    await caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp", networkId: "preprod" });
+    expect((await caller(holder).issuer.registry()).credentials).toHaveLength(1);
+    expect((await caller(stranger).issuer.registry()).credentials).toHaveLength(0);
+  });
+
+  it("revokes the row when the ledger revokes the commitment", async () => {
+    const issuerId = await withIssuer();
+    await caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp", networkId: "preprod" });
+    await caller(holder).credential.revoke({ credentialKey: COMMITMENT });
+    expect((await caller(holder).issuer.registry()).credentials[0].status).toBe("revoked");
+  });
+
+  it("will not let a stranger revoke a credential they do not hold", async () => {
+    const issuerId = await withIssuer();
+    await caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "Bootcamp", networkId: "preprod" });
+    await caller(stranger).credential.revoke({ credentialKey: COMMITMENT });
+    expect((await caller(holder).issuer.registry()).credentials[0].status).toBe("active");
+  });
+
+  it("rejects a title or key the column cannot hold", async () => {
+    const issuerId = await withIssuer();
+    await expect(caller(holder).credential.issue({ issuerId, credentialKey: "short", title: "Bootcamp", networkId: "preprod" })).rejects.toThrow();
+    await expect(caller(holder).credential.issue({ issuerId, credentialKey: COMMITMENT, title: "", networkId: "preprod" })).rejects.toThrow();
   });
 });
