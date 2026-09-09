@@ -71,7 +71,28 @@ export function createWalletBridge(api: WalletBridgeApi, deps: BridgeDeps = defa
 export type ProviderBundleOptions = {
   /** Where `pnpm contracts:build` publishes `keys/` and `zkir/`. */
   zkAssetsBaseUrl?: string;
+  /** Overridable so the resolution can be tested without a browser. */
+  origin?: string;
 };
+
+/** Where `pnpm contracts:build` publishes `keys/` and `zkir/`. */
+export const DEFAULT_ZK_ASSETS_PATH = "/compact/proofpass";
+
+/**
+ * FetchZkConfigProvider calls `new URL(baseURL)` with no base, so a path like
+ * "/compact/proofpass" throws `TypeError: Invalid URL`. Anything relative is
+ * resolved against the page origin before it ever reaches the provider.
+ */
+export function resolveAssetsBaseUrl(input?: string, origin?: string): string {
+  const candidate = input?.trim() || DEFAULT_ZK_ASSETS_PATH;
+  try {
+    return new URL(candidate).toString().replace(/\/$/, "");
+  } catch {
+    const base = origin ?? (typeof location === "undefined" ? undefined : location.origin);
+    if (!base) throw new Error(`Cannot resolve "${candidate}" without an origin; pass an absolute zkAssetsBaseUrl.`);
+    return new URL(candidate, base).toString().replace(/\/$/, "");
+  }
+}
 
 /**
  * Assembles the full provider set from a connected wallet. Every endpoint comes
@@ -83,7 +104,7 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
   // Midnight.js keeps the network as global state; addresses are encoded against it.
   setNetworkId(configuration.networkId);
 
-  const zkConfigProvider = new FetchZkConfigProvider<string>(options.zkAssetsBaseUrl ?? "/compact/proofpass");
+  const zkConfigProvider = new FetchZkConfigProvider<string>(resolveAssetsBaseUrl(options.zkAssetsBaseUrl, options.origin));
   const [proofProvider, shielded] = await Promise.all([
     dappConnectorProofProvider(api, zkConfigProvider, CostModel.initialCostModel()),
     api.getShieldedAddresses(),

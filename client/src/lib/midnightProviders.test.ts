@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWalletBridge, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
+import { createWalletBridge, DEFAULT_ZK_ASSETS_PATH, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
 
 /**
  * The bridge is pure representation-shuffling between Midnight.js and the DApp
@@ -94,5 +94,34 @@ describe("midnightProvider.submitTx", () => {
     const api = { submitTransaction: async () => { throw new Error("insufficient DUST"); } } as unknown as WalletBridgeApi;
     const { midnightProvider } = createWalletBridge(api, deps);
     await expect(midnightProvider.submitTx(tx([1], ["id-1"]))).rejects.toThrow(/DUST/);
+  });
+});
+
+/**
+ * Regression: the ZK asset base was passed through as "/compact/proofpass", and
+ * FetchZkConfigProvider calls `new URL(baseURL)` with no base — so deployment
+ * died with "Failed to construct 'URL': Invalid URL" before it reached the
+ * wallet. A Node probe had passed because it was handed an absolute URL.
+ */
+describe("resolveAssetsBaseUrl", () => {
+  it("makes the default path absolute against the page origin", () => {
+    expect(resolveAssetsBaseUrl(undefined, "http://localhost:3010")).toBe("http://localhost:3010/compact/proofpass");
+  });
+
+  it("resolves any relative path the caller passes", () => {
+    expect(resolveAssetsBaseUrl("/assets/zk", "https://proofpass.example")).toBe("https://proofpass.example/assets/zk");
+  });
+
+  it("leaves an absolute URL alone", () => {
+    expect(resolveAssetsBaseUrl("https://cdn.example/zk", "http://localhost:3010")).toBe("https://cdn.example/zk");
+  });
+
+  it("produces something new URL() accepts on its own, which is the whole point", () => {
+    expect(() => new URL(resolveAssetsBaseUrl(undefined, "http://localhost:3010"))).not.toThrow();
+    expect(() => new URL(DEFAULT_ZK_ASSETS_PATH)).toThrow(/Invalid URL/);
+  });
+
+  it("says what is missing rather than throwing a bare URL error", () => {
+    expect(() => resolveAssetsBaseUrl("/compact/proofpass", "")).toThrow(/absolute zkAssetsBaseUrl/);
   });
 });
