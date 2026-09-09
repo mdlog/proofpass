@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -353,5 +353,31 @@ describe("ledgerReadBlocker", () => {
 
   it("reports nothing to fix when both are present", () => {
     expect(ledgerReadBlocker(true, "0200abc")).toBeNull();
+  });
+});
+
+/**
+ * Every endpoint comes from the wallet, and none of them were visible anywhere.
+ * When proving fails with "Failed to fetch" there is no way to tell which host
+ * was not reached — the prover, the indexer, or the node.
+ */
+describe("walletEndpoints", () => {
+  const full = { networkId: "preprod", indexerUri: "https://indexer.example/api", proverServerUri: "http://127.0.0.1:6300", substrateNodeUri: "wss://node.example" };
+
+  it("reports the prover, which is what proving fails against", () => {
+    expect(walletEndpoints(full)).toContainEqual({ label: "Prover", value: "http://127.0.0.1:6300" });
+  });
+
+  it("reports the indexer and the node alongside it", () => {
+    const labels = walletEndpoints(full).map((entry) => entry.label);
+    expect(labels).toEqual(expect.arrayContaining(["Indexer", "Node", "Network"]));
+  });
+
+  it("says a field was not reported rather than showing an empty row", () => {
+    expect(walletEndpoints({ networkId: "preprod" })).toContainEqual({ label: "Prover", value: "not reported" });
+  });
+
+  it("still lists every endpoint when the wallet gave no configuration at all", () => {
+    expect(walletEndpoints(undefined)).toHaveLength(4);
   });
 });

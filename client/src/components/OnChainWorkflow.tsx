@@ -8,7 +8,7 @@ import { buildMidnightProviders } from "../lib/midnightProviders";
 import type { MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
-  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret,
+  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
   type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
 } from "../lib/proofpassContract";
 import { resolveAuthoritySecret } from "../lib/proofpassDeploy";
@@ -140,6 +140,12 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
         <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || blocker !== null}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
       </div>
       <p className="modal-note">A revoked commitment can never be reissued, so running the workflow again needs a new credential.</p>
+    </section>
+
+    <section className="panel">
+      <div className="panel-heading"><div><p className="eyebrow">Wallet endpoints</p><h2>Where this proves and reads</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
+      <div className="role-control-list">{walletEndpoints(walletSession?.configuration).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}</div>
+      <p className="modal-note">Proving runs inside the wallet against its own prover — a step that fails with "Failed to fetch" failed to reach one of these.</p>
     </section>
 
     <section className="panel">

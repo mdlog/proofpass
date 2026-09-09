@@ -292,3 +292,24 @@ export function ledgerReadBlocker(walletConnected: boolean, contractAddress: str
   if (!contractAddress.trim()) return "Enter the address of a deployed contract, or deploy one from the Issuer workspace — its address is kept from there.";
   return null;
 }
+
+export type WalletConfiguration = { networkId?: string; indexerUri?: string; proverServerUri?: string; substrateNodeUri?: string };
+
+/**
+ * The endpoints the wallet reports, for showing.
+ *
+ * Every one of them comes from `getConfiguration()` and none were visible
+ * anywhere, so a proof that fails with "Failed to fetch" gave no way to tell
+ * which host went unanswered. A missing field is said out loud rather than
+ * rendered as a blank row, because "the wallet did not report a prover" and
+ * "the prover is unreachable" call for different fixes.
+ */
+export function walletEndpoints(configuration?: WalletConfiguration): { label: string; value: string }[] {
+  const value = (raw?: string) => raw?.trim() || "not reported";
+  return [
+    { label: "Network", value: value(configuration?.networkId) },
+    { label: "Prover", value: value(configuration?.proverServerUri) },
+    { label: "Indexer", value: value(configuration?.indexerUri) },
+    { label: "Node", value: value(configuration?.substrateNodeUri) },
+  ];
+}
