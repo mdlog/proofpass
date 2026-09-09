@@ -3,6 +3,7 @@ import { fromHex, toHex } from "@midnight-ntwrk/compact-runtime";
 import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { readableMessage } from "./describeError";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { CostModel, Transaction } from "@midnight-ntwrk/midnight-js-protocol/ledger";
@@ -144,6 +145,80 @@ export class ReportingZkConfigProvider extends FetchZkConfigProvider<string> {
   }
 }
 
+type KeyValueStore = Pick<Storage, "getItem" | "setItem">;
+
+const PRIVATE_STATE_PASSWORD_KEY = "proofpass:private-state-password";
+
+const PASSWORD_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~!@#$%^&*";
+
+/**
+ * The strength policy `levelPrivateStateProvider` applies to the password on
+ * every read and write, mirrored here so a password is never handed over that
+ * it will reject. Its own errors state the rules: at least 16 characters, three
+ * of the four character classes, no more than three identical characters in a
+ * row, and no four characters running in sequence.
+ */
+function satisfiesPasswordPolicy(password: string): boolean {
+  if (password.length < 16) return false;
+  const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((cls) => cls.test(password)).length;
+  if (classes < 3) return false;
+  if (/(.)\1{3,}/.test(password)) return false;
+  const lower = password.toLowerCase();
+  for (let at = 0; at + 3 < lower.length; at += 1) {
+    const steps = [1, 2, 3].map((n) => lower.charCodeAt(at + n) - lower.charCodeAt(at + n - 1));
+    if (steps.every((step) => step === 1) || steps.every((step) => step === -1)) return false;
+  }
+  return true;
+}
+
+function generatePassword(): string {
+  // Random draws land outside the policy only rarely, so rejection sampling is
+  // simpler than steering the generator and keeps every character random.
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const candidate = [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]).join("");
+    if (satisfiesPasswordPolicy(candidate)) return candidate;
+  }
+  throw new Error("Could not generate a private state password that satisfies the storage policy.");
+}
+
+/**
+ * The password the private state store is encrypted with.
+ *
+ * `levelPrivateStateProvider` refuses to build without one and enforces a
+ * minimum strength, but a browser dApp has no passphrase to ask the user for.
+ * A generated secret is what there is: it keeps the IndexedDB contents from
+ * being readable by eye, while living in the same localStorage as the authority
+ * secret — so it raises no bar that localStorage does not already set. A
+ * deployment that needs more should take a real passphrase from the operator.
+ *
+ * A rejected password is replaced rather than kept: an earlier build stored 32
+ * random bytes as hex, which is only two character classes, and the policy runs
+ * on every read and write — so nothing was ever stored under it to orphan.
+ */
+export function resolvePrivateStatePassword(store: KeyValueStore = localStorage): string {
+  const stored = store.getItem(PRIVATE_STATE_PASSWORD_KEY);
+  if (stored && satisfiesPasswordPolicy(stored)) return stored;
+  const generated = generatePassword();
+  store.setItem(PRIVATE_STATE_PASSWORD_KEY, generated);
+  return generated;
+}
+
+/**
+ * Where Midnight.js keeps the private state and the contract's signing key.
+ *
+ * `submitDeployTx` writes all three — contract address, initial private state,
+ * signing key — *after* the transaction is submitted, so a missing provider
+ * does not stop a deploy: it loses the record of one that already happened.
+ * The store is scoped to the wallet account, which is what keeps two wallets in
+ * the same browser from reading each other's state.
+ */
+export function createPrivateStateProvider(accountId: string, store?: KeyValueStore) {
+  return levelPrivateStateProvider({
+    accountId,
+    privateStoragePasswordProvider: () => resolvePrivateStatePassword(store),
+  });
+}
+
 /**
  * Assembles the full provider set from a connected wallet. Every endpoint comes
  * from the wallet itself — indexer, prover and node URIs are all in
@@ -175,6 +250,7 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
     zkConfigProvider,
     proofProvider,
     publicDataProvider: indexerPublicDataProvider(configuration.indexerUri, configuration.indexerWsUri),
+    privateStateProvider: createPrivateStateProvider(shielded.shieldedCoinPublicKey),
     walletProvider: walletProvider(shielded),
     midnightProvider,
   };

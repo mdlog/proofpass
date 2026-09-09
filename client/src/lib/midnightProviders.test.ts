@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildMidnightProviders, createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
+import { buildMidnightProviders, createPrivateStateProvider, createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, resolvePrivateStatePassword, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
 
 /**
  * The bridge is pure representation-shuffling between Midnight.js and the DApp
@@ -248,5 +248,81 @@ describe("ReportingZkConfigProvider fetch binding", () => {
   it("still lets a caller inject its own fetch, which the other tests rely on", async () => {
     const provider = new ReportingZkConfigProvider(UNREACHABLE, respond([4, 2]) as unknown as typeof fetch);
     expect([...(await provider.getZKIR("proveEligibility"))]).toEqual([4, 2]);
+  });
+});
+
+/**
+ * `submitDeployTx` writes the contract address, the initial private state and a
+ * freshly sampled signing key through `providers.privateStateProvider` — after
+ * the transaction has already been submitted and confirmed. Leaving it out did
+ * not fail the deploy; it failed the bookkeeping afterwards, with
+ * "Cannot read properties of undefined (reading 'setContractAddress')" and a
+ * contract already live on chain whose address had just been thrown away.
+ */
+describe("private state", () => {
+  const fakeStore = () => {
+    const held = new Map<string, string>();
+    return { getItem: (key: string) => held.get(key) ?? null, setItem: (key: string, value: string) => void held.set(key, value), held };
+  };
+
+  /**
+   * The policy levelPrivateStateProvider enforces on every read and write, as
+   * stated by its own errors: at least 16 characters, three of the four
+   * character classes, no more than three identical characters in a row, and no
+   * four characters running in sequence.
+   */
+  function policyComplaint(password: string): string | null {
+    if (password.length < 16) return `only ${password.length} characters`;
+    const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((cls) => cls.test(password)).length;
+    if (classes < 3) return `only ${classes} character classes`;
+    if (/(.)\1{3,}/.test(password)) return "four identical characters in a row";
+    const lower = password.toLowerCase();
+    for (let at = 0; at + 3 < lower.length; at += 1) {
+      const steps = [1, 2, 3].map((n) => lower.charCodeAt(at + n) - lower.charCodeAt(at + n - 1));
+      if (steps.every((s) => s === 1) || steps.every((s) => s === -1)) return `a run in sequence: ${password.slice(at, at + 4)}`;
+    }
+    return null;
+  }
+
+  it("generates a password the SDK's strength policy accepts, every time", () => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const password = resolvePrivateStatePassword(fakeStore());
+      expect(policyComplaint(password), password).toBeNull();
+    }
+  });
+
+  it("rejects a hex password, which is what the first attempt generated", () => {
+    const hex = "a".repeat(2) + "3f9c1b7e05d2486a9f0c3e5b1d7a4c8e2b6f0a9d3c5e7b1f4a8c";
+    expect(policyComplaint(hex)).toBe("only 2 character classes");
+  });
+
+  it("replaces a stored password the policy would reject, rather than staying broken", () => {
+    const store = fakeStore();
+    store.setItem("proofpass:private-state-password", "3f9c1b7e05d2486a9f0c3e5b1d7a4c8e");
+    const password = resolvePrivateStatePassword(store);
+    expect(password).not.toBe("3f9c1b7e05d2486a9f0c3e5b1d7a4c8e");
+    expect(policyComplaint(password)).toBeNull();
+  });
+
+  it("keeps the same password, or every reload orphans the stored state", () => {
+    const store = fakeStore();
+    expect(resolvePrivateStatePassword(store)).toBe(resolvePrivateStatePassword(store));
+  });
+
+  it("does not reuse the authority secret as the storage password", () => {
+    const store = fakeStore();
+    resolvePrivateStatePassword(store);
+    expect([...store.held.keys()]).not.toContain("proofpass:authority-secret");
+  });
+
+  it("builds a provider with the methods the deploy calls once the transaction lands", () => {
+    const provider = createPrivateStateProvider("mn_shield-cpk_test1abc", fakeStore());
+    for (const method of ["setContractAddress", "set", "get", "setSigningKey", "getSigningKey"] as const) {
+      expect(typeof provider[method]).toBe("function");
+    }
+  });
+
+  it("refuses to build without a wallet account, so two wallets cannot share a store", () => {
+    expect(() => createPrivateStateProvider("", fakeStore())).toThrow(/accountId/);
   });
 });
