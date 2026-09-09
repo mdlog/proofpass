@@ -83,6 +83,8 @@ export type MidnightConnectedApi = {
   balanceSealedTransaction?: (tx: string, options?: { payFees?: boolean }) => Promise<{ tx: string }>;
   submitTransaction?: (tx: string) => Promise<string>;
   signData?: (data: string, options: Record<string, unknown>) => Promise<unknown>;
+  /** Hands back a prover bound to the wallet's own proof server. */
+  getProvingProvider?: (keyMaterialProvider: unknown) => Promise<unknown>;
 };
 
 declare global {
