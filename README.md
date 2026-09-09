@@ -126,7 +126,12 @@ pm2 start ecosystem.config.cjs && pm2 save
 Not done yet, and the reason is concrete: the wallet's DUST balance is zero, so nothing can pay
 transaction fees.
 
-1. Fund the wallet at <https://faucet.preprod.midnight.network/>.
+1. Fund the wallet with tNIGHT (<https://faucet.preview.midnight.network/> for
+   preview, or the preprod faucet for preprod) — then wait for DUST. Fees are
+   paid in DUST, not NIGHT: DUST is a shielded, non-transferable resource that a
+   NIGHT balance generates over time up to a cap, and on a fresh wallet it takes
+   roughly 12 hours to start accruing via the cross-chain path. A funded wallet
+   with zero DUST still cannot submit anything.
 2. Build the Midnight.js providers. Every endpoint comes from the connected wallet itself —
    `getConfiguration()` returns `indexerUri`, `indexerWsUri`, `proverServerUri` and
    `substrateNodeUri`, and `getProvingProvider()` pairs with
@@ -134,10 +139,15 @@ transaction fees.
 3. Call `deployContract` from `@midnight-ntwrk/midnight-js-contracts`, then store the returned
    address in `issuers.contractAddress` (the column already exists).
 
-The provider packages are **not installed yet** and there is no `contracts:deploy` script —
-this path is documented, not implemented, because it cannot be exercised without funds.
+The Midnight.js provider packages are installed (all pinned to 4.1.1, matching
+`midnight-js-contracts`), but there is still no `contracts:deploy` script: two pieces of the
+provider contract can only be settled against a live wallet — `MidnightProvider.submitTx` must
+return a `TransactionId` while the connector's `submitTransaction` returns `void`, and
+`WalletProvider.balanceTx` takes an `UnboundTransaction` where the connector takes a serialised
+string. Writing that bridge blind would be guesswork.
 
-No local proof server is needed on preprod: the wallet points at a hosted prover.
+No local proof server is needed on the public testnets: the wallet's `getConfiguration()`
+points at a hosted prover.
 
 ## Contract
 

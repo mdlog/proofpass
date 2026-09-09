@@ -61,7 +61,7 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 | 7 | **Approve proof** | "The approval stores a single-use nonce and the disclosed facts — that is the replay protection from our threat model." | Status flips to Approved |
 | 8 | **Activity** | "The trail grew from the action you just watched. The seeded rows are labelled Demo — we do not pass fixtures off as real." | New entries at the top, Demo tags below |
 | 9 | Terminal: `cat contracts/proofpass.compact` | "And this is the part that is not a mock." | Contract source |
-| 10 | **Issuer workspace** → **Issue credential** | "The generated module is loaded in the browser and the circuit name is checked against the compiled contract." | Toast: `proofpass.issueCredential validated at preprod` |
+| 10 | **Issuer workspace** → **Issue credential** | "The generated module is loaded in the browser and the circuit name is checked against the compiled contract." | Toast: `proofpass.issueCredential validated at <network>` |
 
 ## 2. Video script (2:30)
 
@@ -119,6 +119,6 @@ Credentials, privacy score, issuer registry health, and the policy builder. Ever
 labelled **Demo** in the UI next to stored ones.
 
 **What would you do with another week?**
-Deploy to preprod and show a transaction hash; wire issuing and revocation through the wallet
+Deploy to a public testnet and show a transaction hash; wire issuing and revocation through the wallet
 rather than only preparing them; and move credentials onto the same stored path the proof requests
 already use.
