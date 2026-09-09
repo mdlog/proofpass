@@ -4,7 +4,7 @@ import { useState } from "react";
 import Home from "./pages/Home";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
-export type Workspace = "overview" | "credentials" | "requests" | "activity" | "issuer" | "verifier" | "settings";
+export type Workspace = "overview" | "credentials" | "requests" | "activity" | "issuer" | "verifier" | "onchain" | "settings";
 
 function App() {
   const [workspace, setWorkspace] = useState<Workspace>("overview");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -288,5 +288,40 @@ describe("callsOf", () => {
     const { seen, calls } = recorder();
     await calls.proveEligibility(issuerId, 1_800_000_000n, nonce);
     expect(seen[0]).toEqual({ circuit: "proveEligibility", args: [issuerId, 1_800_000_000n, nonce] });
+  });
+});
+
+/**
+ * The commitment binds the expiry, and `proveEligibility` recomputes it from the
+ * expiry the holder passes. Recomputing "now + an hour" on a later render would
+ * produce a different commitment and strand the credential already on chain, so
+ * the value issued has to be the value kept.
+ */
+describe("credential draft", () => {
+  const store = () => {
+    const held = new Map<string, string>();
+    return { getItem: (key: string) => held.get(key) ?? null, setItem: (key: string, value: string) => void held.set(key, value), held };
+  };
+
+  it("reads back the exact expiry that was issued", () => {
+    const kept = store();
+    rememberCredentialDraft({ slug: "northstar", expiresAt: 1_800_000_000n }, kept);
+    expect(lastCredentialDraft(kept)).toEqual({ slug: "northstar", expiresAt: 1_800_000_000n });
+  });
+
+  it("survives the JSON round trip a bigint does not make on its own", () => {
+    const kept = store();
+    rememberCredentialDraft({ slug: "s", expiresAt: 9_007_199_254_740_993n }, kept);
+    expect(lastCredentialDraft(kept)?.expiresAt).toBe(9_007_199_254_740_993n);
+  });
+
+  it("reports nothing rather than throwing when no credential was drafted", () => {
+    expect(lastCredentialDraft(store())).toBeNull();
+  });
+
+  it("ignores a corrupt draft instead of failing the whole panel", () => {
+    const kept = store();
+    kept.setItem("proofpass:credential-draft", "{not json");
+    expect(lastCredentialDraft(kept)).toBeNull();
   });
 });

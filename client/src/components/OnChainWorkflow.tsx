@@ -1,0 +1,170 @@
+import { BadgeCheck, Blocks, KeyRound, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { lastDeployedContract } from "../lib/deployedContract";
+import { readableMessage } from "../lib/describeError";
+import { bytesToHex } from "../lib/hex";
+import { buildMidnightProviders } from "../lib/midnightProviders";
+import type { MidnightWalletSession } from "../lib/midnightWallet";
+import {
+  availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
+  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, rememberCredentialDraft, resolveHolderSecret,
+  type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
+} from "../lib/proofpassContract";
+import { resolveAuthoritySecret } from "../lib/proofpassDeploy";
+
+/**
+ * The issuer → holder → verifier workflow, run against the deployed contract.
+ *
+ * Every step reports what the ledger says afterwards, because a transaction that
+ * succeeds is not by itself evidence that state changed. The steps the chain
+ * cannot accept are disabled with the contract's own reason — that only saves
+ * DUST, the contract's assert remains the authority.
+ *
+ * Deliberately separate from the issuer and verifier workspaces, which run on
+ * stored rows and seeded data: nothing here is a demo.
+ */
+
+type Providers = Awaited<ReturnType<typeof buildMidnightProviders>>;
+
+const STEPS: { id: WorkflowStep; label: string; role: ContractRole; hint: string }[] = [
+  { id: "register", label: "Register issuer", role: "authority", hint: "Authority publishes the issuer id" },
+  { id: "issue", label: "Issue credential", role: "authority", hint: "Authority publishes the holder's commitment" },
+  { id: "prove", label: "Prove eligibility", role: "holder", hint: "Holder proves knowledge of the secret" },
+  { id: "revoke", label: "Revoke credential", role: "authority", hint: "Authority retires the commitment, one way" },
+];
+
+const short = (hex: string) => hex.length > 20 ? `${hex.slice(0, 10)}…${hex.slice(-6)}` : hex;
+
+export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: MidnightWalletSession | null; onConnect: () => void }) {
+  const [address, setAddress] = useState(() => lastDeployedContract()?.contractAddress ?? "");
+  const [draft, setDraft] = useState<CredentialDraft>(() => lastCredentialDraft() ?? { slug: "northstar-academy", expiresAt: expirySecondsFromNow(3600) });
+  const [identity, setIdentity] = useState<{ issuerId: Uint8Array; commitment: Uint8Array } | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+  const [snapshot, setSnapshot] = useState<LedgerSnapshot | null>(null);
+  const [busy, setBusy] = useState<WorkflowStep | "read" | null>(null);
+  const providersRef = useRef<Providers | null>(null);
+
+  // The commitment is what every later step is measured against, so it is
+  // derived from the draft rather than recomputed at each click.
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      try {
+        const issuerId = await deriveIssuerId(draft.slug);
+        const commitment = credentialCommitmentFor(issuerId, draft.expiresAt, resolveHolderSecret().secret);
+        if (current) { setIdentity({ issuerId, commitment }); setIdentityError(null); }
+      } catch (error) {
+        if (current) { setIdentity(null); setIdentityError(readableMessage(error, "The compiled artifact could not be read.")); }
+      }
+    })();
+    return () => { current = false; };
+  }, [draft]);
+
+  const startDraft = (slug: string) => {
+    const next = { slug, expiresAt: expirySecondsFromNow(3600) };
+    rememberCredentialDraft(next);
+    setDraft(next);
+  };
+
+  const ensureProviders = useCallback(async () => {
+    if (!walletSession) throw new Error("Connect a Midnight wallet first.");
+    providersRef.current ??= await buildMidnightProviders(walletSession.connected as never);
+    return providersRef.current;
+  }, [walletSession]);
+
+  const readLedger = async (providers?: Providers) => {
+    setBusy("read");
+    try {
+      const resolved = providers ?? await ensureProviders();
+      const next = await fetchLedgerSnapshot(resolved as never, address.trim());
+      setSnapshot(next);
+      if (!next) toast.error("No contract at that address", { description: "The indexer has never seen it on this network." });
+    } catch (error) {
+      toast.error("Could not read the ledger", { description: readableMessage(error, "The indexer did not answer.") });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runStep = async (step: WorkflowStep) => {
+    if (!identity) return;
+    const { role } = STEPS.find((entry) => entry.id === step)!;
+    setBusy(step);
+    try {
+      const providers = await ensureProviders();
+      const secret = role === "holder" ? resolveHolderSecret().secret : resolveAuthoritySecret().secret;
+      const calls = callsOf(await connectProofPass(providers, address.trim(), role, secret));
+      if (step === "register") await calls.registerIssuer(identity.issuerId);
+      if (step === "issue") await calls.issueCredential(identity.issuerId, identity.commitment);
+      if (step === "prove") await calls.proveEligibility(identity.issuerId, draft.expiresAt, freshNonce());
+      if (step === "revoke") await calls.revokeCredential(identity.commitment);
+      toast.success(`${STEPS.find((entry) => entry.id === step)!.label} accepted`, { description: "Reading the ledger back…" });
+      await readLedger(providers);
+    } catch (error) {
+      // The contract's asserts say exactly what is wrong; nothing here says it better.
+      toast.error(`${STEPS.find((entry) => entry.id === step)!.label} failed`, { description: readableMessage(error, "The wallet did not complete the transaction.") });
+      setBusy(null);
+    }
+  };
+
+  const steps = snapshot && identity
+    ? availableSteps(snapshot, { issuerId: bytesToHex(identity.issuerId), commitment: bytesToHex(identity.commitment), expiresAt: draft.expiresAt })
+    : null;
+  const expiry = new Date(Number(draft.expiresAt) * 1000);
+
+  return <div className="page-content role-page">
+    <div className="section-heading">
+      <div>
+        <p className="eyebrow">On-chain workflow</p>
+        <h1>Run it against the real contract</h1>
+        <p className="section-description">Every step is a transaction the wallet signs, and every result is read back from the ledger. Nothing on this page is demo data.</p>
+      </div>
+      <button className={`connector-state ${walletSession ? "connector-live" : ""}`} onClick={walletSession ? undefined : onConnect}>{walletSession ? "Wallet ready" : "Connect wallet"}</button>
+    </div>
+
+    <section className="panel">
+      <div className="panel-heading"><div><p className="eyebrow">Deployed contract</p><h2>Contract under test</h2></div><Blocks size={19} className="muted-icon" /></div>
+      <label className="request-field"><span>Contract address</span><input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="0200…" spellCheck={false} /></label>
+      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} /></label>
+      <div className="role-control-list">
+        <div><span>Issuer id</span><strong>{identity ? short(bytesToHex(identity.issuerId)) : "—"}</strong></div>
+        <div><span>Commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
+        <div><span>Expires</span><strong>{expiry.toISOString().replace("T", " ").slice(0, 19)}Z</strong></div>
+      </div>
+      {identityError && <p className="modal-note"><XCircle size={14} /> {identityError}</p>}
+      <div className="modal-actions">
+        <button className="button button-ghost" onClick={() => startDraft(draft.slug)} disabled={busy !== null}><KeyRound size={15} /> Start a new credential</button>
+        <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || !address.trim() || !walletSession}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
+      </div>
+      <p className="modal-note">A revoked commitment can never be reissued, so running the workflow again needs a new credential.</p>
+    </section>
+
+    <section className="panel">
+      <div className="panel-heading"><div><p className="eyebrow">Ledger state</p><h2>What the chain says</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
+      {snapshot
+        ? <div className="role-control-list">
+            <div><span>Registered issuers</span><strong>{snapshot.issuers.length}</strong></div>
+            <div><span>This issuer</span><strong>{snapshot.issuers.find((entry) => identity && entry.id === bytesToHex(identity.issuerId))?.status ?? "UNREGISTERED"}</strong></div>
+            <div><span>Credentials in the vault</span><strong>{snapshot.credentials.length}</strong></div>
+            <div><span>Revoked credentials</span><strong>{snapshot.revokedCredentials.length}</strong></div>
+            <div><span>Accepted proofs</span><strong>{snapshot.acceptedProofs.toString()}</strong></div>
+            <div><span>Spent nonces</span><strong>{snapshot.spentNonces}</strong></div>
+          </div>
+        : <p className="modal-note">Read the ledger to see the contract's current state.</p>}
+    </section>
+
+    <section className="panel">
+      <div className="panel-heading"><div><p className="eyebrow">Workflow</p><h2>Five circuits, in order</h2></div><BadgeCheck size={19} className="muted-icon" /></div>
+      {STEPS.map((step) => {
+        const availability = steps?.[step.id];
+        return <div className="role-event" key={step.id}>
+          <div className={`activity-icon ${availability?.ready ? "activity-approved" : "activity-revoked"}`}>{availability?.ready ? <BadgeCheck size={15} /> : <XCircle size={15} />}</div>
+          <div><strong>{step.label}</strong><p>{availability?.reason ?? step.hint} · {step.role} key</p></div>
+          <button className="button button-primary" onClick={() => void runStep(step.id)} disabled={busy !== null || !availability?.ready}>{busy === step.id ? "Submitting…" : "Run"}</button>
+        </div>;
+      })}
+      {!snapshot && <p className="modal-note">Steps unlock once the ledger has been read — the chain decides which are possible, not this panel.</p>}
+    </section>
+  </div>;
+}

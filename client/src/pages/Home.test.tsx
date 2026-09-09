@@ -64,6 +64,7 @@ describe("workspace navigation", () => {
       ["Settings", "Settings"],
       ["Issuer workspace", "Issue with confidence."],
       ["Verifier workspace", "Ask for less. Know enough."],
+      ["On-chain workflow", "Run it against the real contract"],
     ] as const) {
       await user.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }));
       await waitFor(() => expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1));

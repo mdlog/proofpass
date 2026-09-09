@@ -249,3 +249,33 @@ export function callsOf(contract: FoundProofPass): ProofPassCalls {
     proveEligibility: (issuerId, expiresAt, nonce) => call("proveEligibility", issuerId, expiresAt, nonce),
   };
 }
+
+const CREDENTIAL_DRAFT_KEY = "proofpass:credential-draft";
+
+export type CredentialDraft = { slug: string; expiresAt: bigint };
+
+/**
+ * The issuer and the holder must agree on the expiry exactly: the commitment
+ * binds it, and `proveEligibility` recomputes the commitment from the expiry the
+ * holder passes. Recomputing "an hour from now" on a later render would strand
+ * the credential already on chain, so what was issued is what is kept.
+ */
+export function rememberCredentialDraft(draft: CredentialDraft, store: KeyValueStore = localStorage): void {
+  try {
+    store.setItem(CREDENTIAL_DRAFT_KEY, JSON.stringify({ slug: draft.slug, expiresAt: draft.expiresAt.toString() }));
+  } catch {
+    // Storage unavailable; the panel keeps the draft in memory for this session.
+  }
+}
+
+export function lastCredentialDraft(store: KeyValueStore = localStorage): CredentialDraft | null {
+  try {
+    const raw = store.getItem(CREDENTIAL_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { slug?: string; expiresAt?: string };
+    if (!parsed.slug || !parsed.expiresAt) return null;
+    return { slug: parsed.slug, expiresAt: BigInt(parsed.expiresAt) };
+  } catch {
+    return null;
+  }
+}
