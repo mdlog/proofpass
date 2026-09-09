@@ -40,7 +40,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { isLoginConfigured, startLogin } from "../const";
 import type { Workspace } from "../App";
 import { useTheme } from "../contexts/ThemeContext";
-import { connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
+import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import { createCompactContractRequest, describeCompactIntegration, getDefaultCompactArtifactManifest, loadCompactArtifact } from "../lib/midnightContract";
 import { trpc } from "../lib/trpc";
 import { ApprovalModal } from "../components/ApprovalModal";
@@ -423,12 +423,28 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
    * adapter rejects an unexpected network (ARCHITECTURE §18), so the network we
    * end up on is one the user asked us to find.
    */
+  /** Keeps the user informed while the wallet's own window is waiting on them. */
+  const waitForWallet = <T,>(wallet: DetectedWallet, call: Promise<T>) =>
+    awaitWalletResponse(call, {
+      walletName: wallet.name,
+      onSlow: () => toast(`Waiting for ${wallet.name}`, { description: "Approve the connection in the wallet's window — it may have opened behind this one, or the wallet may be locked." }),
+    });
+
+  const reportWalletFailure = (wallet: DetectedWallet, error: unknown) => {
+    if (error instanceof WalletUnresponsiveError) {
+      toast.error(`${wallet.name} did not respond`, { description: error.message });
+      return;
+    }
+    toast.error("Wallet connection cancelled", { description: error instanceof Error ? error.message : "The wallet did not approve this connection." });
+  };
+
   const findWalletNetwork = async (wallet: DetectedWallet) => {
     setConnectingWallet(true);
     try {
-      await adoptSession(await discoverWalletNetwork(wallet, targetNetwork));
+      await adoptSession(await waitForWallet(wallet, discoverWalletNetwork(wallet, targetNetwork)));
     } catch (error) {
-      toast.error("No network matched", { description: error instanceof Error ? error.message : `${wallet.name} did not accept any Midnight network.` });
+      if (error instanceof WalletUnresponsiveError) reportWalletFailure(wallet, error);
+      else toast.error("No network matched", { description: error instanceof Error ? error.message : `${wallet.name} did not accept any Midnight network.` });
     } finally {
       setConnectingWallet(false);
     }
@@ -437,7 +453,7 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const connectWallet = async (wallet: DetectedWallet) => {
     setConnectingWallet(true);
     try {
-      await adoptSession(await connectMidnightWallet(wallet, targetNetwork));
+      await adoptSession(await waitForWallet(wallet, connectMidnightWallet(wallet, targetNetwork)));
     } catch (error) {
       if (error instanceof WalletNetworkMismatchError) {
         toast.error("Wrong network selected", {
@@ -445,7 +461,7 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
           action: { label: "Find it", onClick: () => { void findWalletNetwork(wallet); } },
         });
       } else {
-        toast.error("Wallet connection cancelled", { description: error instanceof Error ? error.message : "The wallet did not approve this connection." });
+        reportWalletFailure(wallet, error);
       }
     } finally {
       setConnectingWallet(false);

@@ -233,6 +233,49 @@ function isWrongNetworkError(error: unknown) {
   return /network id mismatch/i.test(message) || /unsupported network id/i.test(message);
 }
 
+/**
+ * Thrown when the wallet never answers. Lace opens its approval window outside
+ * the page, so an unanswered prompt looks identical to a dead extension from
+ * here: the promise simply never settles, and without this the UI sits on a
+ * disabled button forever (PRD §11 requires a recoverable state instead).
+ */
+export class WalletUnresponsiveError extends Error {
+  constructor(walletName: string, waitedMs: number) {
+    super(`${walletName} did not respond within ${Math.round(waitedMs / 1000)}s. Check for an approval window, and that the wallet is unlocked.`);
+    this.name = "WalletUnresponsiveError";
+  }
+}
+
+/** How long before we suggest the user goes looking for the wallet's window. */
+export const WALLET_SLOW_AFTER_MS = 8_000;
+/** Approving takes human time, so the ceiling is generous — but finite. */
+export const WALLET_TIMEOUT_MS = 120_000;
+
+/**
+ * Wraps a wallet call so a silent wallet becomes a message rather than a
+ * spinner. `onSlow` fires once, while the call is still in flight.
+ */
+export async function awaitWalletResponse<T>(
+  call: Promise<T>,
+  { walletName, onSlow, slowAfterMs = WALLET_SLOW_AFTER_MS, timeoutMs = WALLET_TIMEOUT_MS }:
+    { walletName: string; onSlow?: () => void; slowAfterMs?: number; timeoutMs?: number },
+): Promise<T> {
+  let slowTimer: ReturnType<typeof setTimeout> | undefined;
+  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      call,
+      new Promise<never>((_, reject) => {
+        if (onSlow) slowTimer = setTimeout(onSlow, slowAfterMs);
+        hardTimer = setTimeout(() => reject(new WalletUnresponsiveError(walletName, timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(slowTimer);
+    clearTimeout(hardTimer);
+  }
+}
+
 /** Thrown when the wallet refuses the network ProofPass asked for. */
 export class WalletNetworkMismatchError extends Error {
   readonly requested: MidnightNetwork;
