@@ -139,6 +139,14 @@ export class ReportingZkConfigProvider extends FetchZkConfigProvider<string> {
  * `getConfiguration()` — so nothing here hardcodes a network.
  */
 export async function buildMidnightProviders(api: WalletBridgeApi, options: ProviderBundleOptions = {}) {
+  // Proving happens in the wallet, never here (ARCHITECTURE §18), so a connector
+  // that predates `getProvingProvider` cannot deploy at all. Unguarded it fails
+  // deep in the SDK as "api.getProvingProvider is not a function", which reads
+  // like an app bug rather than an out-of-date wallet.
+  if (typeof api.getProvingProvider !== "function") {
+    throw new Error("This wallet cannot prove: it does not expose getProvingProvider, which version 4 of the Midnight DApp Connector API requires. Update the wallet extension to a build that implements it.");
+  }
+
   const configuration = await api.getConfiguration();
   // Midnight.js keeps the network as global state; addresses are encoded against it.
   setNetworkId(configuration.networkId);

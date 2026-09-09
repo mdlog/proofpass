@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
+import { buildMidnightProviders, createWalletBridge, DEFAULT_ZK_ASSETS_PATH, ReportingZkConfigProvider, resolveAssetsBaseUrl, type BridgeDeps, type WalletBridgeApi } from "./midnightProviders";
 
 /**
  * The bridge is pure representation-shuffling between Midnight.js and the DApp
@@ -176,5 +176,29 @@ describe("ReportingZkConfigProvider", () => {
     const provider = new ReportingZkConfigProvider(BASE, respondWith(bytes, { status: 200, headers: { "content-type": "application/octet-stream" } }));
     expect([...(await provider.getVerifierKey("registerIssuer"))]).toEqual([1, 2, 3, 4]);
     expect(provider.firstFailure).toBeUndefined();
+  });
+});
+
+/**
+ * Proving happens in the wallet (ARCHITECTURE §18), so a connector that predates
+ * `getProvingProvider` cannot deploy at all. Without a guard that surfaces as
+ * "api.getProvingProvider is not a function" from inside the SDK, which reads
+ * like an app bug rather than an out-of-date wallet.
+ */
+describe("buildMidnightProviders wallet capabilities", () => {
+  it("names the missing capability rather than failing inside the SDK", async () => {
+    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi)).rejects.toThrow(/getProvingProvider/);
+  });
+
+  it("says which connector version requires it, so the fix is to update the wallet", async () => {
+    await expect(buildMidnightProviders({} as unknown as WalletBridgeApi)).rejects.toThrow(/DApp Connector/);
+  });
+
+  it("lets a wallet that exposes it through to the rest of the setup", async () => {
+    const api = {
+      getProvingProvider: async () => ({}),
+      getConfiguration: async () => { throw new Error("reached getConfiguration"); },
+    } as unknown as WalletBridgeApi;
+    await expect(buildMidnightProviders(api)).rejects.toThrow(/reached getConfiguration/);
   });
 });
