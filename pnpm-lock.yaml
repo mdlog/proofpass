@@ -6,6 +6,7 @@ settings:
 
 overrides:
   tailwindcss>nanoid: 3.3.7
+  '@midnight-ntwrk/ledger-v8': 8.1.0
 
 patchedDependencies:
   wouter@3.7.1:
@@ -1304,9 +1305,6 @@ packages:
 
   '@midnight-ntwrk/ledger-v8@8.1.0':
     resolution: {integrity: sha512-rwOVP5kBwACpYmmY6+oLeaiM3e5gHscRMjbZUOntOC5QdtqLdpeep6eQW1OngI+sxjjdVoGg2eE16sLf+DAHmQ==}
-
-  '@midnight-ntwrk/ledger-v8@8.1.2':
-    resolution: {integrity: sha512-H8r5J892bltVtplh1bq947SH/+/jWx07/PaIGSQG8Bd21bObN+sR5eMVTb/RRIRlf2g7MJB4jzgbikMnVZnHqA==}
 
   '@midnight-ntwrk/midnight-js-contracts@4.1.1':
     resolution: {integrity: sha512-vHeKyaj9RXTx+Cep3YpIRgg2EWkzibO4gxI7k/rYpXmGXc3waetrR5sb9FPR7v9SUX00/zf/sYbLp1NZhwZbjg==}
@@ -5895,8 +5893,6 @@ snapshots:
 
   '@midnight-ntwrk/ledger-v8@8.1.0': {}
 
-  '@midnight-ntwrk/ledger-v8@8.1.2': {}
-
   '@midnight-ntwrk/midnight-js-contracts@4.1.1':
     dependencies:
       '@midnight-ntwrk/midnight-js-network-id': 4.1.1
@@ -5988,7 +5984,7 @@ snapshots:
 
   '@midnight-ntwrk/wallet-sdk-address-format@3.1.2':
     dependencies:
-      '@midnight-ntwrk/ledger-v8': 8.1.2
+      '@midnight-ntwrk/ledger-v8': 8.1.0
       '@scure/base': 2.4.0
       '@subsquid/scale-codec': 4.0.1
 
