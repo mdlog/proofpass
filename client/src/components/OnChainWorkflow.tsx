@@ -8,7 +8,7 @@ import { buildMidnightProviders } from "../lib/midnightProviders";
 import type { MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
-  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, rememberCredentialDraft, resolveHolderSecret,
+  fetchLedgerSnapshot, freshNonce, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret,
   type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
 } from "../lib/proofpassContract";
 import { resolveAuthoritySecret } from "../lib/proofpassDeploy";
@@ -108,6 +108,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     }
   };
 
+  const blocker = ledgerReadBlocker(Boolean(walletSession), address);
   const steps = snapshot && identity
     ? availableSteps(snapshot, { issuerId: bytesToHex(identity.issuerId), commitment: bytesToHex(identity.commitment), expiresAt: draft.expiresAt })
     : null;
@@ -133,9 +134,10 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
         <div><span>Expires</span><strong>{expiry.toISOString().replace("T", " ").slice(0, 19)}Z</strong></div>
       </div>
       {identityError && <p className="modal-note"><XCircle size={14} /> {identityError}</p>}
+      {blocker && <p className="modal-note"><XCircle size={14} /> {blocker}{!walletSession && <> <button className="text-button" onClick={onConnect}>Connect wallet</button></>}</p>}
       <div className="modal-actions">
         <button className="button button-ghost" onClick={() => startDraft(draft.slug)} disabled={busy !== null}><KeyRound size={15} /> Start a new credential</button>
-        <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || !address.trim() || !walletSession}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
+        <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || blocker !== null}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
       </div>
       <p className="modal-note">A revoked commitment can never be reissued, so running the workflow again needs a new credential.</p>
     </section>
@@ -164,7 +166,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
           <button className="button button-primary" onClick={() => void runStep(step.id)} disabled={busy !== null || !availability?.ready}>{busy === step.id ? "Submitting…" : "Run"}</button>
         </div>;
       })}
-      {!snapshot && <p className="modal-note">Steps unlock once the ledger has been read — the chain decides which are possible, not this panel.</p>}
+      {!snapshot && <p className="modal-note">{blocker ?? "Press Read ledger — the chain decides which steps are possible, not this panel."}</p>}
       <p className="modal-note">The contract's fifth circuit, <code>revokeIssuer</code>, is off this path: it would stop the issuer from issuing anything further.</p>
     </section>
   </div>;

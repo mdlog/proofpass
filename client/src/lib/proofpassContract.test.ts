@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -323,5 +323,31 @@ describe("credential draft", () => {
     const kept = store();
     kept.setItem("proofpass:credential-draft", "{not json");
     expect(lastCredentialDraft(kept)).toBeNull();
+  });
+});
+
+/**
+ * The wallet session does not survive a reload, so a panel that only greys the
+ * button out leaves the operator clicking a control that will never respond.
+ */
+describe("ledgerReadBlocker", () => {
+  it("asks for the wallet first, since every provider comes from it", () => {
+    expect(ledgerReadBlocker(false, "0200abc")).toMatch(/wallet/i);
+  });
+
+  it("says the session is gone rather than implying the wallet was never connected", () => {
+    expect(ledgerReadBlocker(false, "0200abc")).toMatch(/reload|reconnect/i);
+  });
+
+  it("asks for an address once the wallet is there", () => {
+    expect(ledgerReadBlocker(true, "   ")).toMatch(/address/i);
+  });
+
+  it("blocks on the wallet before the address, which is the order they are fixed in", () => {
+    expect(ledgerReadBlocker(false, "")).toMatch(/wallet/i);
+  });
+
+  it("reports nothing to fix when both are present", () => {
+    expect(ledgerReadBlocker(true, "0200abc")).toBeNull();
   });
 });

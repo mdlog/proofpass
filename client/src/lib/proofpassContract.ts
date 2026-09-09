@@ -279,3 +279,16 @@ export function lastCredentialDraft(store: KeyValueStore = localStorage): Creden
     return null;
   }
 }
+
+/**
+ * Why the ledger cannot be read yet, or null when it can.
+ *
+ * The wallet session lives in memory only, so a reload drops it while the
+ * contract address — kept in localStorage — survives. A disabled button alone
+ * makes that look like a page that does not respond.
+ */
+export function ledgerReadBlocker(walletConnected: boolean, contractAddress: string): string | null {
+  if (!walletConnected) return "Connect a Midnight wallet first — every provider comes from it, and the session does not survive a reload.";
+  if (!contractAddress.trim()) return "Enter the address of a deployed contract.";
+  return null;
+}
