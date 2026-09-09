@@ -2,7 +2,7 @@ import { BadgeCheck, Blocks, KeyRound, RefreshCw, ShieldCheck, XCircle } from "l
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { lastDeployedContract } from "../lib/deployedContract";
-import { readableMessage } from "../lib/describeError";
+import { describeError, readableMessage } from "../lib/describeError";
 import { bytesToHex } from "../lib/hex";
 import { buildMidnightProviders } from "../lib/midnightProviders";
 import type { MidnightWalletSession } from "../lib/midnightWallet";
@@ -103,7 +103,15 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
       await readLedger(providers);
     } catch (error) {
       // The contract's asserts say exactly what is wrong; nothing here says it better.
+      const described = describeError(error);
       toast.error(`${STEPS.find((entry) => entry.id === step)!.label} failed`, { description: readableMessage(error, "The wallet did not complete the transaction.") });
+      // A toast is gone in seconds and proving fails inside the wallet, where
+      // the cause chain is the only place the real reason survives. Keep the
+      // last one where a reload cannot take it.
+      console.error(`[ProofPass] ${step} failed`, error, described);
+      try {
+        localStorage.setItem("proofpass:last-step-error", JSON.stringify({ step, at: new Date().toISOString(), described }));
+      } catch { /* storage unavailable; the console still has it */ }
       setBusy(null);
     }
   };
