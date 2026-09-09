@@ -139,12 +139,19 @@ transaction fees.
 3. Call `deployContract` from `@midnight-ntwrk/midnight-js-contracts`, then store the returned
    address in `issuers.contractAddress` (the column already exists).
 
-The Midnight.js provider packages are installed (all pinned to 4.1.1, matching
-`midnight-js-contracts`), but there is still no `contracts:deploy` script: two pieces of the
-provider contract can only be settled against a live wallet — `MidnightProvider.submitTx` must
-return a `TransactionId` while the connector's `submitTransaction` returns `void`, and
-`WalletProvider.balanceTx` takes an `UnboundTransaction` where the connector takes a serialised
-string. Writing that bridge blind would be guesswork.
+`client/src/lib/midnightProviders.ts` assembles the providers from a connected wallet. The two
+interfaces that looked mismatched turned out to be the same object in different clothes: the
+connector's own documentation says `balanceUnsealedTransaction` takes a serialised
+`Transaction<SignatureEnabled, Proof, PreBinding>` — Midnight.js's `UnboundTransaction` — and
+`submitTransaction` takes a serialised `Transaction<SignatureEnabled, Proof, Binding>`, its
+`FinalizedTransaction`. So the bridge is `serialize`/`deserialize` through hex, and the
+`TransactionId` that `submitTransaction` never returns comes off the transaction itself via
+`identifiers()`.
+
+What is still missing is the deploy call that uses them, and the browser-side `CompiledContract`
+it needs. That is deliberate: none of it can be exercised until a wallet authorises the origin and
+the account holds DUST, and shipping an unexercised deploy path is how a demo turns into a false
+claim.
 
 No local proof server is needed on the public testnets: the wallet's `getConfiguration()`
 points at a hosted prover.
