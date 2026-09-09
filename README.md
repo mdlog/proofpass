@@ -20,7 +20,7 @@ Seeded rows are labelled **Demo** in the UI wherever they sit next to stored one
 | Midnight wallet connection | **Real.** Midnight DApp Connector API v4 against Lace, with a wallet picker, API-version filtering, and an explicit "no Midnight wallet" state. |
 | Proof requests (create / approve / decline) | **Real.** Stored in MySQL behind authenticated tRPC procedures, with a consent record carrying a single-use nonce and the disclosed facts. |
 | Compact contract | **Compiled and deployed.** `contracts/proofpass.compact` builds to five circuits with real prover and verifier keys, and the browser deploys it through the connected wallet. |
-| On-chain transactions | **Deployment only.** The deploy transaction is prepared here and then balanced, proved and submitted by the wallet. The five circuits are not called yet — see [Deploying the contract](#deploying-the-contract). |
+| On-chain transactions | **Deploy exercised, circuits wired.** The deploy has been run against preprod through Lace. The five circuits are callable from the On-chain workspace and have not yet been run live — see [Deploying the contract](#deploying-the-contract). |
 | Credentials, privacy score, issuer registry health, policy builder | **Seeded demo data.** |
 | Hosted sign-in | **Not configured.** Without `VITE_OAUTH_PORTAL_URL` the sign-in prompt says so rather than failing silently. |
 
@@ -154,9 +154,18 @@ connector's own documentation says `balanceUnsealedTransaction` takes a serialis
 `TransactionId` that `submitTransaction` never returns comes off the transaction itself via
 `identifiers()`.
 
-What is still missing is calling the circuits. `deployContract` hands back a `callTx` interface
-for `registerIssuer`, `issueCredential`, `revokeCredential` and `proveEligibility`, and nothing
-uses it yet: issuing and revoking still move rows in MySQL rather than ledger state.
+The **On-chain workspace** runs the whole workflow against a deployed contract: register an
+issuer, issue a credential, prove eligibility, revoke it — each a transaction the wallet signs,
+each followed by reading the ledger back, because a transaction that succeeds is not by itself
+evidence that state changed. It is deliberately separate from the issuer and verifier workspaces,
+which still move rows in MySQL and show seeded data.
+
+`localSecretKey()` is the constraint that shapes it: `assertAuthority()` hashes it into the
+registry authority, while `proveEligibility` derives the credential commitment from it as the
+*holder's* secret. One private state cannot be both, so the two roles keep separate secrets under
+separate private state ids, and — since `pureCircuits.credentialCommitment` is exported — the
+holder computes the commitment in the browser and hands the issuer only the result. The issuer
+never learns the secret behind it.
 
 Four things a browser build needs that a Node one does not, each of which failed loudly before it
 was handled:
@@ -204,8 +213,9 @@ contracts/             proofpass.compact and its build output (gitignored)
 
 ## Known limitations
 
-- The only on-chain transaction is the deploy; the five circuits are never called, so issuing and
-  revoking change stored rows rather than ledger state.
+- Only the deploy has been exercised on chain so far. The five circuits are wired and callable
+  from the On-chain workspace, but have not yet been run against a live network.
+- The issuer, verifier and holder workspaces still read and write MySQL rows, not ledger state.
 - Credentials, privacy score, and the policy builder are seeded data.
 - Hosted sign-in requires an OAuth server this repository does not include.
 - A decline reason is shown back to the holder but not stored — `proofRequests` has no column for it.
