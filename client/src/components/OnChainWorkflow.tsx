@@ -155,7 +155,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
     </section>
 
     <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Workflow</p><h2>Five circuits, in order</h2></div><BadgeCheck size={19} className="muted-icon" /></div>
+      <div className="panel-heading"><div><p className="eyebrow">Workflow</p><h2>Four steps, in order</h2></div><BadgeCheck size={19} className="muted-icon" /></div>
       {STEPS.map((step) => {
         const availability = steps?.[step.id];
         return <div className="role-event" key={step.id}>
@@ -165,6 +165,7 @@ export function OnChainWorkflow({ walletSession, onConnect }: { walletSession: M
         </div>;
       })}
       {!snapshot && <p className="modal-note">Steps unlock once the ledger has been read — the chain decides which are possible, not this panel.</p>}
+      <p className="modal-note">The contract's fifth circuit, <code>revokeIssuer</code>, is off this path: it would stop the issuer from issuing anything further.</p>
     </section>
   </div>;
 }
