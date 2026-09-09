@@ -126,17 +126,19 @@ pm2 start ecosystem.config.cjs && pm2 save
 Not done yet, and the reason is concrete: the wallet's DUST balance is zero, so nothing can pay
 transaction fees.
 
-1. Fund the wallet with tNIGHT (<https://faucet.preview.midnight.network/> for
-   preview, or the preprod faucet for preprod) — then wait for DUST. Fees are
-   paid in DUST, not NIGHT: DUST is a shielded, non-transferable resource that a
-   NIGHT balance generates over time up to a cap, and on a fresh wallet it takes
-   roughly 12 hours to start accruing via the cross-chain path. A funded wallet
-   with zero DUST still cannot submit anything.
-2. Build the Midnight.js providers. Every endpoint comes from the connected wallet itself —
+1. Request tNIGHT from the network faucet — preview:
+   <https://midnight-tmnight-preview.nethermind.dev/>, preprod:
+   <https://midnight-tmnight-preprod.nethermind.dev/>. Both are rate limited.
+2. Register that tNIGHT for tDUST generation, natively on Midnight: in Lace open
+   **Tokens** and use **Generate tDUST**. Fees are paid in DUST, not NIGHT —
+   DUST is shielded and non-transferable, and a NIGHT balance only generates it
+   once designated. Until the tDUST Tank leaves `Empty`, nothing can be
+   submitted, however much NIGHT the wallet holds.
+3. Build the Midnight.js providers. Every endpoint comes from the connected wallet itself —
    `getConfiguration()` returns `indexerUri`, `indexerWsUri`, `proverServerUri` and
    `substrateNodeUri`, and `getProvingProvider()` pairs with
    `@midnight-ntwrk/midnight-js-dapp-connector-proof-provider`.
-3. Call `deployContract` from `@midnight-ntwrk/midnight-js-contracts`, then store the returned
+4. Call `deployContract` from `@midnight-ntwrk/midnight-js-contracts`, then store the returned
    address in `issuers.contractAddress` (the column already exists).
 
 `client/src/lib/midnightProviders.ts` assembles the providers from a connected wallet. The two
