@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
-import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, WalletUnresponsiveError, type DetectedWallet } from "./midnightWallet";
+import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, isStaleProviderError, WalletNetworkMismatchError, WalletStaleError, WalletUnresponsiveError, type DetectedWallet } from "./midnightWallet";
 
 /**
  * A stand-in for Lace 2.2.3. Its `connect` accepts exactly one network — the one
@@ -138,5 +138,31 @@ describe("awaitWalletResponse", () => {
     await vi.advanceTimersByTimeAsync(200_000);
     expect(onSlow).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/**
+ * Reproduces what Lace actually returns once its service worker has restarted:
+ * the page still holds the injected provider, but the first call over it dies
+ * on a channel that no longer exists. Reporting that as "connection cancelled"
+ * sends the user looking for an approval window that will never appear.
+ */
+describe("isStaleProviderError", () => {
+  it("recognises the channel-shutdown failure Lace reports", () => {
+    expect(isStaleProviderError(new Error("Remote API with channel 'feature-flags' was shutdown: object can no longer be used."))).toBe(true);
+  });
+
+  it("recognises the other extension-context failures", () => {
+    expect(isStaleProviderError(new Error("Extension context invalidated."))).toBe(true);
+    expect(isStaleProviderError(new Error("Could not establish connection. Receiving end does not exist."))).toBe(true);
+  });
+
+  it("leaves ordinary wallet failures alone", () => {
+    expect(isStaleProviderError(new Error("Access to wallet api denied"))).toBe(false);
+    expect(isStaleProviderError(new Error("Network ID mismatch"))).toBe(false);
+  });
+
+  it("tells the user to reload rather than to look for a prompt", () => {
+    expect(new WalletStaleError("lace").message).toMatch(/reload the page/i);
   });
 });

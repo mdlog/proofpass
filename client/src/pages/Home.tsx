@@ -40,7 +40,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { isLoginConfigured, startLogin } from "../const";
 import type { Workspace } from "../App";
 import { useTheme } from "../contexts/ThemeContext";
-import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
+import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, isStaleProviderError, WalletNetworkMismatchError, WalletStaleError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import { createCompactContractRequest, describeCompactIntegration, getDefaultCompactArtifactManifest, loadCompactArtifact } from "../lib/midnightContract";
 import { describeError, readableMessage } from "../lib/describeError";
 import { deployProofPass } from "../lib/proofpassDeploy";
@@ -435,6 +435,17 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const reportWalletFailure = (wallet: DetectedWallet, error: unknown) => {
     if (error instanceof WalletUnresponsiveError) {
       toast.error(`${wallet.name} did not respond`, { description: error.message });
+      return;
+    }
+    if (isStaleProviderError(error)) {
+      // "Wallet connection cancelled" is misleading here: nobody cancelled
+      // anything, the page is talking to an extension context that is gone.
+      const stale = new WalletStaleError(wallet.name);
+      toast.error(`${wallet.name} needs a page reload`, {
+        description: stale.message,
+        action: { label: "Reload", onClick: () => window.location.reload() },
+        duration: 30_000,
+      });
       return;
     }
     toast.error("Wallet connection cancelled", { description: error instanceof Error ? error.message : "The wallet did not approve this connection." });

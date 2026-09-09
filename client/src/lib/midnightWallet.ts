@@ -278,6 +278,25 @@ export async function awaitWalletResponse<T>(
   }
 }
 
+/**
+ * The injected provider is a live handle into the extension. When the wallet's
+ * service worker restarts — which switching networks or reloading the extension
+ * does — the handle the page still holds is dead, and the first call across it
+ * fails with a channel-shutdown message rather than anything about wallets.
+ * Only a fresh page load gets a working provider injected again.
+ */
+export function isStaleProviderError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /was shutdown|object can no longer be used|context invalidated|receiving end does not exist/i.test(message);
+}
+
+export class WalletStaleError extends Error {
+  constructor(walletName: string) {
+    super(`${walletName} restarted, so this page is holding a dead connection to it. Reload the page — with the wallet already unlocked — and connect again.`);
+    this.name = "WalletStaleError";
+  }
+}
+
 /** Thrown when the wallet refuses the network ProofPass asked for. */
 export class WalletNetworkMismatchError extends Error {
   readonly requested: MidnightNetwork;
