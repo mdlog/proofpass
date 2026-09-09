@@ -21,7 +21,8 @@ Seeded rows are labelled **Demo** in the UI wherever they sit next to stored one
 | Proof requests (create / approve / decline) | **Real.** Stored in MySQL behind authenticated tRPC procedures, with a consent record carrying a single-use nonce and the disclosed facts. |
 | Compact contract | **Compiled and deployed.** `contracts/proofpass.compact` builds to five circuits with real prover and verifier keys, and the browser deploys it through the connected wallet. |
 | On-chain transactions | **Real.** Deploy plus `registerIssuer`, `issueCredential`, `proveEligibility` and `revokeCredential` have all been run against preprod through Lace, with the resulting ledger state read back from the indexer. `revokeIssuer` is implemented and deliberately unexercised — see [Deploying the contract](#deploying-the-contract). |
-| Credentials, privacy score, issuer registry health, policy builder | **Seeded demo data.** |
+| Overview counts and issuer registry health | **Real.** Credential and verification counts come from the store; the hero block height comes from the indexer the wallet names. Each shows an em dash when there is nothing to read, rather than a figure. |
+| Credential cards, privacy score, policy builder | **Seeded demo data,** labelled wherever it sits beside a stored value. The privacy score and "data kept private" stay seeded because neither has a definition yet — computing them from an invented formula would be worse than saying so. |
 | Hosted sign-in | **Not configured.** Without `VITE_OAUTH_PORTAL_URL` the sign-in prompt says so rather than failing silently. |
 
 The app still never holds a key and never talks to a node: it prepares the transaction, and the

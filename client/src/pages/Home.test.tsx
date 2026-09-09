@@ -54,6 +54,42 @@ function renderApp() {
 
 const heading = () => screen.getByRole("heading", { level: 1 }).textContent ?? "";
 
+/**
+ * PRD §5 "Honest demo": a number is either read from the store or marked as
+ * seeded. These two used to be hardcoded — "3 of 4 total" credentials and "18"
+ * proofs shared — with a Demo tag doing the apologising. They now read from the
+ * registry, and with no session there is nothing to read, so they show the same
+ * em dash the issuer workspace already uses rather than a fabricated figure.
+ */
+describe("Overview metrics", () => {
+  const metricCard = (label: RegExp) =>
+    screen.getAllByRole("button").find((button) => label.test(button.textContent ?? ""));
+
+  it("no longer prints a fabricated credential count", () => {
+    renderApp();
+    const card = metricCard(/Active credentials/);
+    expect(card?.textContent).toMatch(/—/);
+    expect(card?.textContent).not.toMatch(/Demo/);
+  });
+
+  it("no longer prints a fabricated count of proofs shared", () => {
+    renderApp();
+    const card = metricCard(/Proofs shared/);
+    expect(card?.textContent).toMatch(/—/);
+    expect(card?.textContent).not.toMatch(/Demo/);
+  });
+
+  it("keeps the Demo label on the figure that has no definition yet", () => {
+    renderApp();
+    expect(metricCard(/Data kept private/)?.textContent).toMatch(/Demo/);
+  });
+
+  it("shows no block height rather than an invented one", () => {
+    renderApp();
+    expect(screen.queryByText(/18,420,991/)).toBeNull();
+  });
+});
+
 describe("workspace navigation", () => {
   /**
    * The breadcrumb was hardcoded to "Overview", so every page claimed to be a
