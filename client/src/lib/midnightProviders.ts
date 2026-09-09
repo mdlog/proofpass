@@ -25,7 +25,7 @@ import type { MidnightProvider, UnboundTransaction, WalletProvider } from "@midn
 /** Only the parts of the connected wallet this bridge actually touches. */
 export type WalletBridgeApi = Pick<
   WalletConnectedAPI,
-  "balanceUnsealedTransaction" | "submitTransaction" | "getShieldedAddresses" | "getConfiguration" | "getProvingProvider"
+  "balanceUnsealedTransaction" | "submitTransaction" | "getShieldedAddresses" | "getConfiguration" | "getProvingProvider" | "getDustBalance"
 >;
 
 /**

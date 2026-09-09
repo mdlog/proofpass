@@ -42,6 +42,7 @@ import type { Workspace } from "../App";
 import { useTheme } from "../contexts/ThemeContext";
 import { awaitWalletResponse, connectMidnightWallet, discoverWalletNetwork, WalletNetworkMismatchError, WalletUnresponsiveError, detectForeignWallets, getNetworkLabel, getStoredNetwork, getWalletInstallUrl, MIDNIGHT_NETWORKS, scanMidnightWallets, setStoredNetwork, SUPPORTED_API_MAJOR, type DetectedWallet, type ForeignWallet, type IncompatibleWallet, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import { createCompactContractRequest, describeCompactIntegration, getDefaultCompactArtifactManifest, loadCompactArtifact } from "../lib/midnightContract";
+import { describeError, readableMessage } from "../lib/describeError";
 import { deployProofPass } from "../lib/proofpassDeploy";
 import { trpc } from "../lib/trpc";
 import { ApprovalModal } from "../components/ApprovalModal";
@@ -566,8 +567,15 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
       }
       console.info("[ProofPass] deployed", result);
     } catch (error) {
-      toast.error("Deployment failed", { description: error instanceof Error ? error.message : "The wallet did not complete the deployment." });
-      console.error("[ProofPass] deploy failed", error);
+      const described = describeError(error);
+      toast.error("Deployment failed", { description: readableMessage(error) });
+      console.error("[ProofPass] deploy failed", error, described);
+      // A failed deploy is the one moment the operator most needs the detail,
+      // and a toast is gone in seconds. Keep the last one where it survives a
+      // reload, so it can be read back instead of reproduced.
+      try {
+        localStorage.setItem("proofpass:last-deploy-error", JSON.stringify(described));
+      } catch { /* storage unavailable; the console still has it */ }
     } finally {
       setDeployingContract(false);
     }

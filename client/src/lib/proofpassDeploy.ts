@@ -1,5 +1,6 @@
 import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import { deployContract } from "@midnight-ntwrk/midnight-js-contracts";
+import { readableMessage } from "./describeError";
 import { buildMidnightProviders, type WalletBridgeApi } from "./midnightProviders";
 
 /**
@@ -51,7 +52,21 @@ export type DeployResult = {
   authority: AuthoritySecret;
 };
 
+/** Fees are paid in DUST, and a wallet holding only NIGHT has none of it yet. */
+export async function readDustBalance(api: WalletBridgeApi) {
+  const { balance, cap } = await api.getDustBalance();
+  return { balance, cap, hasNone: balance === 0n, registered: cap > 0n };
+}
+
 export async function deployProofPass(api: WalletBridgeApi, options: { zkAssetsBaseUrl?: string } = {}): Promise<DeployResult> {
+  const dust = await readDustBalance(api);
+  if (!dust.registered) {
+    throw new Error("This wallet generates no DUST yet. In Lace, open Tokens and use \"Generate tDUST\" to designate your NIGHT — fees are paid in DUST, not NIGHT.");
+  }
+  if (dust.hasNone) {
+    throw new Error("DUST balance is 0. Designated NIGHT accrues DUST over time; wait for the tank to fill and try again.");
+  }
+
   const providers = await buildMidnightProviders(api, options);
   const authority = resolveAuthoritySecret();
 
@@ -79,11 +94,21 @@ export async function deployProofPass(api: WalletBridgeApi, options: { zkAssetsB
   // Relative: the ZK config provider resolves it against its own base URL.
   compiled = builder.withCompiledFileAssets(compiled, "");
 
-  const deployed = await deployContract(providers as never, {
-    compiledContract: compiled,
-    privateStateId: "proofpass",
-    initialPrivateState: { secret: authority.secret },
-  } as never) as { deployTxData: { public: { contractAddress: string } } };
+  let deployed: { deployTxData: { public: { contractAddress: string } } };
+  try {
+    deployed = await deployContract(providers as never, {
+      compiledContract: compiled,
+      privateStateId: "proofpass",
+      initialPrivateState: { secret: authority.secret },
+    } as never) as { deployTxData: { public: { contractAddress: string } } };
+  } catch (error) {
+    // "could not balance dust" says nothing about how short the wallet was.
+    const message = readableMessage(error, "The wallet did not complete the deployment.");
+    if (/insufficient|balance dust/i.test(message)) {
+      throw new Error(`${message}. Wallet holds ${dust.balance} of a ${dust.cap} DUST cap — wait for the tank to fill further and retry.`, { cause: error });
+    }
+    throw error;
+  }
 
   return {
     contractAddress: deployed.deployTxData.public.contractAddress,
