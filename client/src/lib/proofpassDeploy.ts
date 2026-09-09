@@ -1,6 +1,7 @@
-import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import { deployContract } from "@midnight-ntwrk/midnight-js-contracts";
+import { bytesToHex, hexToBytes } from "./hex";
 import { readableMessage } from "./describeError";
+import { buildProofPassContract } from "./proofpassContract";
 import { buildMidnightProviders, type WalletBridgeApi } from "./midnightProviders";
 
 /**
@@ -15,14 +16,11 @@ const AUTHORITY_STORAGE_KEY = "proofpass:authority-secret";
 
 export type ProofPassPrivateState = { secret: Uint8Array };
 
-function hexToBytes(hex: string) {
-  const clean = hex.trim().replace(/^0x/, "");
-  if (clean.length !== 64 || !/^[0-9a-f]+$/i.test(clean)) throw new Error("Authority seed must be 32 bytes of hex.");
-  return Uint8Array.from(clean.match(/../g)!.map((byte) => parseInt(byte, 16)));
-}
-
-function bytesToHex(bytes: Uint8Array) {
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** The witness returns Bytes<32>, so anything else is a configuration error. */
+function secretFromHex(hex: string, what: string) {
+  const bytes = hexToBytes(hex);
+  if (bytes.length !== 32) throw new Error(`${what} must be 32 bytes of hex, got ${bytes.length}.`);
+  return bytes;
 }
 
 export type AuthoritySecret = { secret: Uint8Array; source: "configured" | "generated"; hex: string };
@@ -33,16 +31,16 @@ export type AuthoritySecret = { secret: Uint8Array; source: "configured" | "gene
  * can never be administered again, so it is either configured explicitly or
  * generated once and handed back to the caller to store.
  */
-export function resolveAuthoritySecret(): AuthoritySecret {
+export function resolveAuthoritySecret(store: Pick<Storage, "getItem" | "setItem"> = localStorage): AuthoritySecret {
   const configured = (import.meta.env.VITE_PROOFPASS_AUTHORITY_SEED as string | undefined)?.trim();
-  if (configured) return { secret: hexToBytes(configured), source: "configured", hex: configured.replace(/^0x/, "") };
+  if (configured) return { secret: secretFromHex(configured, "Authority seed"), source: "configured", hex: configured.replace(/^0x/, "") };
 
-  const stored = localStorage.getItem(AUTHORITY_STORAGE_KEY);
-  if (stored) return { secret: hexToBytes(stored), source: "generated", hex: stored };
+  const stored = store.getItem(AUTHORITY_STORAGE_KEY);
+  if (stored) return { secret: secretFromHex(stored, "Stored authority secret"), source: "generated", hex: stored };
 
   const generated = crypto.getRandomValues(new Uint8Array(32));
   const hex = bytesToHex(generated);
-  localStorage.setItem(AUTHORITY_STORAGE_KEY, hex);
+  store.setItem(AUTHORITY_STORAGE_KEY, hex);
   return { secret: generated, source: "generated", hex };
 }
 
@@ -81,29 +79,10 @@ export async function deployProofPass(api: WalletBridgeApi, options: { zkAssetsB
   const providers = await buildMidnightProviders(api, options);
   const authority = resolveAuthoritySecret();
 
-  const generated = await import("@compact/proofpass") as { Contract?: unknown; __artifactMissing?: boolean };
-  if (generated.__artifactMissing || !generated.Contract) {
-    throw new Error("Generated Compact module is missing. Run `pnpm contracts:build` first.");
-  }
-
   // The witness feeds the contract the secret without it ever reaching the
-  // ledger: `authorityKey()` hashes it, and only the hash is published.
-  const witnesses = {
-    localSecretKey: ({ privateState }: { privateState: ProofPassPrivateState }): [ProofPassPrivateState, Uint8Array] =>
-      [privateState, privateState.secret],
-  };
-
-  // The builder is Effect-style and its generics track what is still missing;
-  // the same loose view server/contractAdapter.ts uses keeps the call readable.
-  const builder = CompiledContract as unknown as {
-    make: (tag: string, ctor: unknown) => unknown;
-    withWitnesses: (self: unknown, witnesses: unknown) => unknown;
-    withCompiledFileAssets: (self: unknown, path: string) => unknown;
-  };
-  let compiled = builder.make("proofpass", generated.Contract);
-  compiled = builder.withWitnesses(compiled, witnesses);
-  // Relative: the ZK config provider resolves it against its own base URL.
-  compiled = builder.withCompiledFileAssets(compiled, "");
+  // ledger: `authorityKey()` hashes it, and only the hash is published. Calls
+  // reuse the same definition, so deploy and call cannot drift apart.
+  const compiled = await buildProofPassContract();
 
   let deployed: { deployTxData: { public: { contractAddress: string } } };
   try {

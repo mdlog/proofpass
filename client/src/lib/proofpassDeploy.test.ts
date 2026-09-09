@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { zkAssetFailureMessage } from "./proofpassDeploy";
+import { resolveAuthoritySecret, zkAssetFailureMessage } from "./proofpassDeploy";
 
 /**
  * A deploy reads the five circuits' verifier keys before the wallet is ever
@@ -27,5 +27,37 @@ describe("zkAssetFailureMessage", () => {
 
   it("points at the build step that produces them", () => {
     expect(zkAssetFailureMessage("prover key for issueCredential: 404", BASE)).toMatch(/contracts:build/);
+  });
+});
+
+/**
+ * The witness hands the circuit a Bytes<32>, so a secret of any other length is
+ * a configuration error that has to surface before a transaction is built —
+ * `authorityKey()` would otherwise hash something the contract cannot match.
+ */
+describe("resolveAuthoritySecret", () => {
+  const fakeStore = () => {
+    const held = new Map<string, string>();
+    return { getItem: (key: string) => held.get(key) ?? null, setItem: (key: string, value: string) => void held.set(key, value), held };
+  };
+
+  it("generates and keeps a 32-byte secret when the browser has none", () => {
+    const store = fakeStore();
+    const first = resolveAuthoritySecret(store);
+    expect(first.secret).toHaveLength(32);
+    expect(first.source).toBe("generated");
+    expect(resolveAuthoritySecret(store).hex).toBe(first.hex);
+  });
+
+  it("refuses a stored secret of the wrong length rather than hashing it anyway", () => {
+    const store = fakeStore();
+    store.setItem("proofpass:authority-secret", "abcd");
+    expect(() => resolveAuthoritySecret(store)).toThrow(/32 bytes/);
+  });
+
+  it("refuses a stored value that is not hex at all", () => {
+    const store = fakeStore();
+    store.setItem("proofpass:authority-secret", "not-a-secret");
+    expect(() => resolveAuthoritySecret(store)).toThrow(/hex/i);
   });
 });
