@@ -343,6 +343,10 @@ describe("ledgerReadBlocker", () => {
     expect(ledgerReadBlocker(true, "   ")).toMatch(/address/i);
   });
 
+  it("says where an address comes from, since an empty field is otherwise a dead end", () => {
+    expect(ledgerReadBlocker(true, "")).toMatch(/issuer workspace/i);
+  });
+
   it("blocks on the wallet before the address, which is the order they are fixed in", () => {
     expect(ledgerReadBlocker(false, "")).toMatch(/wallet/i);
   });

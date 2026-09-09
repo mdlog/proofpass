@@ -289,6 +289,6 @@ export function lastCredentialDraft(store: KeyValueStore = localStorage): Creden
  */
 export function ledgerReadBlocker(walletConnected: boolean, contractAddress: string): string | null {
   if (!walletConnected) return "Connect a Midnight wallet first — every provider comes from it, and the session does not survive a reload.";
-  if (!contractAddress.trim()) return "Enter the address of a deployed contract.";
+  if (!contractAddress.trim()) return "Enter the address of a deployed contract, or deploy one from the Issuer workspace — its address is kept from there.";
   return null;
 }
