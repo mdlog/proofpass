@@ -8,7 +8,7 @@ import {
   credentialSummary,
   toDisplayCredential,
   toDisplayRequest,
-  visibleRequests,
+  preferStored,
   type CredentialView,
   type ProofRequestView,
   type ServerProofRequest,
@@ -206,25 +206,30 @@ describe("credentialSummary", () => {
  * a list where four of five entries are fabricated reads as a mock even when it
  * is not.
  */
-describe("visibleRequests", () => {
+describe("preferStored", () => {
   const stored = (id: string) => ({ id }) as ProofRequestView;
   const seeded = (id: string) => ({ id }) as ProofRequestView;
 
-  it("shows only stored requests once any exist", () => {
-    const visible = visibleRequests([stored("s1")], [seeded("d1"), seeded("d2")]);
-    expect(visible.map((r) => r.id)).toEqual(["s1"]);
+  it("shows only stored rows once any exist", () => {
+    expect(preferStored([stored("s1")], [seeded("d1"), seeded("d2")]).map((r) => r.id)).toEqual(["s1"]);
   });
 
   it("falls back to seeded rows when nothing is stored, so the page is not empty", () => {
-    expect(visibleRequests([], [seeded("d1"), seeded("d2")]).map((r) => r.id)).toEqual(["d1", "d2"]);
+    expect(preferStored([], [seeded("d1"), seeded("d2")]).map((r) => r.id)).toEqual(["d1", "d2"]);
   });
 
-  it("keeps every stored request, in the order given", () => {
-    const visible = visibleRequests([stored("s1"), stored("s2")], [seeded("d1")]);
-    expect(visible.map((r) => r.id)).toEqual(["s1", "s2"]);
+  it("keeps every stored row, in the order given", () => {
+    expect(preferStored([stored("s1"), stored("s2")], [seeded("d1")]).map((r) => r.id)).toEqual(["s1", "s2"]);
   });
 
   it("shows nothing rather than inventing rows when both are empty", () => {
-    expect(visibleRequests([], [])).toEqual([]);
+    expect(preferStored([], [])).toEqual([]);
+  });
+
+  it("applies to credentials on the same terms, since the reason is the same", () => {
+    const held = { seeded: false, title: "real" } as CredentialView;
+    const demo = { seeded: true, title: "seeded" } as CredentialView;
+    expect(preferStored([held], [demo, demo])).toEqual([held]);
+    expect(preferStored([], [demo])).toEqual([demo]);
   });
 });

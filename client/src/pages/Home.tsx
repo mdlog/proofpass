@@ -57,7 +57,7 @@ import { RequestRow } from "../components/ProofRequestCard";
 import { StatusPill } from "../components/StatusBadge";
 import { toActivityItems, type ActivityItem } from "../lib/activity";
 import { activityItems, initialRequests } from "../lib/mock-data";
-import { CONSENT_VERSION, serverRequestId, toDisplayCredential, toDisplayRequest, visibleRequests, credentialSummary, type CredentialStatus, type CredentialView, type NewRequestInput, type ProofRequestView, type RequestStatus, type ServerProofRequest } from "../lib/types";
+import { CONSENT_VERSION, serverRequestId, preferStored, toDisplayCredential, toDisplayRequest, credentialSummary, type CredentialStatus, type CredentialView, type NewRequestInput, type ProofRequestView, type RequestStatus, type ServerProofRequest } from "../lib/types";
 
 type NavItem = {
   id: Workspace;
@@ -399,7 +399,7 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   // Persisted requests lead, because those are the ones the operator just made;
   // the seeded set stays behind them so the demo still reads as populated.
   const serverRequests = useMemo(() => ((registryQuery.data?.proofRequests ?? []) as ServerProofRequest[]).map(toDisplayRequest), [registryQuery.data]);
-  const allRequests = useMemo(() => visibleRequests(serverRequests, requests), [serverRequests, requests]);
+  const allRequests = useMemo(() => preferStored(serverRequests, requests), [serverRequests, requests]);
   // PRD §13.3: the trail has to grow when a request is answered, so real rows
   // lead and the seeded ones stay behind them wearing a Demo label.
   const activity = useMemo<ActivityItem[]>(() => [
@@ -675,7 +675,8 @@ export default function Home({ workspace, onWorkspaceChange }: { workspace: Work
   const allCredentials = useMemo(() => {
     const issuerName = new Map((registryQuery.data?.issuers ?? []).map((issuer) => [issuer.id, issuer.displayName]));
     const stored = (registryQuery.data?.credentials ?? []).map((row) => toDisplayCredential(row, issuerName.get(row.issuerId)));
-    return [...stored, ...seededCredentials];
+    // The same rule the request list uses: seeded cards only when nothing is stored.
+    return preferStored(stored, seededCredentials);
   }, [registryQuery.data]);
 
   const registryIssuers = useMemo(

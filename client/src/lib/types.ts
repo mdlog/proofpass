@@ -172,13 +172,14 @@ export function credentialSummary(credentials: CredentialView[]): string {
 }
 
 /**
- * Which proof requests to show.
+ * Which rows to show: the stored ones, or the seeded ones if there are none.
  *
- * Seeded rows exist so the page is not empty before anything is stored. Once
- * real rows arrive that reason is gone, and keeping them beside real ones only
+ * Seeded rows exist so a page is not empty before anything is stored. Once real
+ * rows arrive that reason is gone, and keeping them beside real ones only
  * dilutes them — a list where four of five entries are fabricated reads as a
  * mock even when it is not, whatever the badges say.
  */
-export function visibleRequests(stored: ProofRequestView[], seeded: ProofRequestView[]): ProofRequestView[] {
+export function preferStored<T>(stored: T[], seeded: T[]): T[] {
   return stored.length > 0 ? stored : seeded;
 }
+
