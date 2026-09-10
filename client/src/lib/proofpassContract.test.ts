@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, dustBlocker, issuerDisplayName, privateStateIdFor, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, dustBlocker, issuerDisplayName, parseHex32, privateStateIdFor, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -152,6 +152,51 @@ describe("readLedgerSnapshot", () => {
     const snapshot = readLedgerSnapshot(fakeLedger({ credentials: [COMMITMENT_HEX], revoked: [], accepted: 3n }) as never);
     expect(snapshot.credentials).toEqual([COMMITMENT_HEX]);
     expect(snapshot.acceptedProofs).toBe(3n);
+  });
+
+  /**
+   * A verifier's entire check is whether the challenge they handed out has been
+   * spent. A count cannot answer that; the nonces themselves can.
+   */
+  it("lists the spent nonces, not merely how many", () => {
+    const nonce = "ee".repeat(32);
+    const snapshot = readLedgerSnapshot(fakeLedger({ nonces: [nonce] }) as never);
+    expect(snapshot.spentNonces).toEqual([nonce]);
+  });
+});
+
+/**
+ * A commitment and a challenge cross between parties by being pasted, so the
+ * shape has to be checked before it reaches a circuit that takes Bytes<32>.
+ */
+describe("parseHex32", () => {
+  const valid = "ab".repeat(32);
+
+  it("accepts 32 bytes of hex", () => {
+    expect(parseHex32(valid)).toHaveLength(32);
+  });
+
+  it("tolerates the whitespace and 0x a pasted value carries", () => {
+    expect(parseHex32(`  0x${valid}  `)).toHaveLength(32);
+  });
+
+  it("refuses a value of the wrong length rather than padding it", () => {
+    expect(parseHex32("abcd")).toBeNull();
+    expect(parseHex32("ab".repeat(33))).toBeNull();
+  });
+
+  it("refuses anything that is not hex", () => {
+    expect(parseHex32("zz".repeat(32))).toBeNull();
+  });
+
+  it("reports nothing for an empty paste rather than throwing", () => {
+    expect(parseHex32("")).toBeNull();
+    expect(parseHex32("   ")).toBeNull();
+  });
+
+  it("round-trips a value this app produced", () => {
+    const bytes = parseHex32(valid)!;
+    expect([...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")).toBe(valid);
   });
 });
 

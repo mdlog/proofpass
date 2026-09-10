@@ -8,7 +8,7 @@ import { buildMidnightProviders, resolveProofServerUri } from "../lib/midnightPr
 import { isMidnightNetwork, type MidnightNetwork, type MidnightWalletSession } from "../lib/midnightWallet";
 import {
   availableSteps, callsOf, connectProofPass, credentialCommitmentFor, deriveIssuerId, expirySecondsFromNow,
-  dustBlocker, fetchLedgerSnapshot, freshNonce, issuerDisplayName, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
+  dustBlocker, fetchLedgerSnapshot, freshNonce, issuerDisplayName, parseHex32, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, resolveHolderSecret, walletEndpoints,
   type ContractRole, type CredentialDraft, type LedgerSnapshot, type WorkflowStep,
 } from "../lib/proofpassContract";
 import { readDustBalance, resolveAuthoritySecret } from "../lib/proofpassDeploy";
@@ -65,6 +65,10 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
   const [snapshot, setSnapshot] = useState<LedgerSnapshot | null>(null);
   const [dust, setDust] = useState<{ balance: bigint; cap: bigint; registered: boolean } | null>(null);
   const [busy, setBusy] = useState<WorkflowStep | "read" | null>(null);
+  // The two values that cross between parties. Both are public; neither can be
+  // turned back into the secret behind it.
+  const [externalCommitment, setExternalCommitment] = useState("");
+  const [challenge, setChallenge] = useState("");
   const providersRef = useRef<Providers | null>(null);
 
   // The commitment is what every later step is measured against, so it is
@@ -127,6 +131,16 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
    * wallet is actually on. Issuer registration elsewhere invents a slug suffix,
    * which makes a row that can never match a ledger entry.
    */
+  const copyValue = async (label: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label} copied`, { description: "Hand it to the other party — it discloses nothing on its own." });
+    } catch {
+      // A blocked clipboard should still let the value be read and selected.
+      toast(`${label}`, { description: value });
+    }
+  };
+
   const registerIssuerRow = async () => {
     const network = walletSession?.configuration?.networkId;
     if (!network || !isMidnightNetwork(network)) {
@@ -195,13 +209,17 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
       const calls = callsOf(await connectProofPass(providers, { contractAddress: address.trim(), role, secret, networkId: network }));
       if (step === "register") await calls.registerIssuer(identity.issuerId);
       if (step === "issue") {
-        await calls.issueCredential(identity.issuerId, identity.commitment);
-        await recordIssued(bytesToHex(identity.commitment));
+        if (!issuedCommitment) throw new Error("No commitment to issue.");
+        await calls.issueCredential(identity.issuerId, issuedCommitment);
+        await recordIssued(bytesToHex(issuedCommitment));
       }
-      if (step === "prove") await calls.proveEligibility(identity.issuerId, draft.expiresAt, freshNonce());
+      // The verifier's challenge when they gave one; otherwise our own, which
+       // proves a credential is valid but binds the proof to nobody's request.
+      if (step === "prove") await calls.proveEligibility(identity.issuerId, draft.expiresAt, pastedChallenge ?? freshNonce());
       if (step === "revoke") {
-        await calls.revokeCredential(identity.commitment);
-        await recordRevoked(bytesToHex(identity.commitment));
+        if (!issuedCommitment) throw new Error("No commitment to revoke.");
+        await calls.revokeCredential(issuedCommitment);
+        await recordRevoked(bytesToHex(issuedCommitment));
       }
       toast.success(`${STEPS.find((entry) => entry.id === step)!.label} accepted`, { description: "Reading the ledger back…" });
       await readLedger(providers);
@@ -221,9 +239,27 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
   };
 
   const blocker = ledgerReadBlocker(Boolean(walletSession), address);
-  const steps = snapshot && identity
+
+  /**
+   * What the issuer publishes: a holder's commitment when one has been handed
+   * over, otherwise this browser's own — which is what makes the single-browser
+   * walkthrough still work.
+   */
+  const pastedCommitment = parseHex32(externalCommitment);
+  const issuedCommitment = pastedCommitment ?? identity?.commitment ?? null;
+  const pastedChallenge = parseHex32(challenge);
+  const commitmentInvalid = externalCommitment.trim().length > 0 && !pastedCommitment;
+  const challengeInvalid = challenge.trim().length > 0 && !pastedChallenge;
+  // Two views of the same ledger. The issuer's steps concern the commitment
+  // being published; proving concerns this browser's own, because the contract
+  // recomputes it from the secret held here and nowhere else.
+  const issuerSteps = snapshot && identity && issuedCommitment
+    ? availableSteps(snapshot, { issuerId: bytesToHex(identity.issuerId), commitment: bytesToHex(issuedCommitment), expiresAt: draft.expiresAt })
+    : null;
+  const holderSteps = snapshot && identity
     ? availableSteps(snapshot, { issuerId: bytesToHex(identity.issuerId), commitment: bytesToHex(identity.commitment), expiresAt: draft.expiresAt })
     : null;
+  const stepAvailability = (step: WorkflowStep) => (step === "prove" ? holderSteps : issuerSteps)?.[step];
   const expiry = new Date(Number(draft.expiresAt) * 1000);
 
   return <div className="page-content role-page">
@@ -278,15 +314,49 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
             <div><span>Credentials in the vault</span><strong>{snapshot.credentials.length}</strong></div>
             <div><span>Revoked credentials</span><strong>{snapshot.revokedCredentials.length}</strong></div>
             <div><span>Accepted proofs</span><strong>{snapshot.acceptedProofs.toString()}</strong></div>
-            <div><span>Spent nonces</span><strong>{snapshot.spentNonces}</strong></div>
+            <div><span>Spent nonces</span><strong>{snapshot.spentNonces.length}</strong></div>
           </div>
         : <p className="modal-note">Read the ledger to see the contract's current state.</p>}
     </section>
 
     <section className="panel">
+      <div className="panel-heading"><div><p className="eyebrow">Three-party exchange</p><h2>What crosses between them</h2></div><KeyRound size={19} className="muted-icon" /></div>
+      <p className="modal-note">Only two values ever cross: a commitment and a challenge. Both are public, and neither can be turned back into the secret behind it. Leave these empty to walk the whole flow in one browser.</p>
+
+      <div className="role-control-list">
+        <div><span>As holder — your commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
+      </div>
+      <div className="modal-actions">
+        <button className="button button-ghost" disabled={!identity} onClick={() => identity && void copyValue("Commitment", bytesToHex(identity.commitment))}>Copy my commitment</button>
+      </div>
+      <p className="modal-note">Computed here from your own secret, which never leaves this browser. Give it to the issuer; they publish it without ever learning the secret.</p>
+
+      <label className="request-field"><span>As issuer — a holder&apos;s commitment to publish</span>
+        <input value={externalCommitment} onChange={(event) => setExternalCommitment(event.target.value)} placeholder="paste a commitment, or leave empty to use your own" spellCheck={false} />
+        <small>{commitmentInvalid ? "Not 32 bytes of hex." : pastedCommitment ? "Issue and Revoke will act on this one." : "Empty: Issue and Revoke act on your own commitment above."}</small>
+      </label>
+
+      <label className="request-field"><span>As verifier — challenge for this presentation</span>
+        <input value={challenge} onChange={(event) => setChallenge(event.target.value)} placeholder="generate one, or paste the verifier&apos;s" spellCheck={false} />
+        <small>{challengeInvalid
+          ? "Not 32 bytes of hex."
+          : !pastedChallenge
+            ? "Empty: Prove uses a fresh nonce, which binds the proof to nobody's request."
+            : !snapshot
+              ? "Read the ledger to check whether it has been used."
+              : snapshot.spentNonces.includes(challenge.trim().replace(/^0x/i, "").toLowerCase())
+                ? "Used on chain — a holder proved for this exact challenge."
+                : "Not used yet. Give it to the holder and read the ledger again afterwards."}</small>
+      </label>
+      <div className="modal-actions">
+        <button className="button button-ghost" onClick={() => { const next = bytesToHex(freshNonce()); setChallenge(next); void copyValue("Challenge", next); }}>New challenge</button>
+      </div>
+    </section>
+
+    <section className="panel">
       <div className="panel-heading"><div><p className="eyebrow">Workflow</p><h2>Four steps, in order</h2></div><BadgeCheck size={19} className="muted-icon" /></div>
       {STEPS.map((step) => {
-        const availability = steps?.[step.id];
+        const availability = stepAvailability(step.id);
         return <div className="role-event" key={step.id}>
           <div className={`activity-icon ${availability?.ready ? "activity-approved" : "activity-revoked"}`}>{availability?.ready ? <BadgeCheck size={15} /> : <XCircle size={15} />}</div>
           <div><strong>{step.label}</strong><p>{availability?.reason ?? step.hint} · {step.role} key</p></div>
@@ -294,6 +364,7 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
         </div>;
       })}
       {!snapshot && <p className="modal-note">{blocker ?? "Press Read ledger — the chain decides which steps are possible, not this panel."}</p>}
+      {commitmentInvalid && <p className="modal-note"><XCircle size={14} /> The pasted commitment is not 32 bytes of hex.</p>}
       <p className="modal-note">The contract's fifth circuit, <code>revokeIssuer</code>, is off this path: it would stop the issuer from issuing anything further.</p>
     </section>
   </div>;

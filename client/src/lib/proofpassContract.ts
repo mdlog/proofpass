@@ -90,7 +90,8 @@ export type LedgerSnapshot = {
   issuers: { id: string; status: IssuerStatusName }[];
   credentials: string[];
   revokedCredentials: string[];
-  spentNonces: number;
+  /** The challenges already used. A verifier checks their own against these. */
+  spentNonces: string[];
   acceptedProofs: bigint;
 };
 
@@ -110,7 +111,7 @@ export function readLedgerSnapshot(ledger: LedgerReader): LedgerSnapshot {
     issuers: [...ledger.issuers].map(([id, status]) => ({ id: bytesToHex(id), status: ISSUER_STATUS_NAMES[status] ?? "UNREGISTERED" })),
     credentials: [...ledger.credentials].map(bytesToHex),
     revokedCredentials: [...ledger.revokedCredentials].map(bytesToHex),
-    spentNonces: [...ledger.spentNonces].length,
+    spentNonces: [...ledger.spentNonces].map(bytesToHex),
     acceptedProofs: ledger.acceptedProofs,
   };
 }
@@ -373,4 +374,18 @@ export function issuerDisplayName(slug: string): string {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
   return name.length >= 2 ? name : `${name || "Issuer"} issuer`.trim();
+}
+
+
+/**
+ * A pasted Bytes<32>, or null.
+ *
+ * A commitment and a challenge cross between parties by being copied, so the
+ * shape is checked before it reaches a circuit that will only take 32 bytes —
+ * and a bad paste says so rather than failing later inside the wallet.
+ */
+export function parseHex32(input: string): Uint8Array | null {
+  const clean = input.trim().replace(/^0x/i, "");
+  if (clean.length !== 64 || !/^[0-9a-f]+$/i.test(clean)) return null;
+  return Uint8Array.from(clean.match(/../g)!.map((byte) => parseInt(byte, 16)));
 }
