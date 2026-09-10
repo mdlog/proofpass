@@ -155,7 +155,30 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
-const plugins = [react(), tailwindcss(), wasm(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
+/**
+ * Injects the analytics tag only when it is configured.
+ *
+ * It used to sit in index.html as `%VITE_ANALYTICS_ENDPOINT%/umami`. Vite leaves
+ * that literal in place when the variable is unset, so every page load fetched a
+ * URL containing a percent sign and got a 400 — console noise for anyone opening
+ * the app, and a red line to rule out while debugging something real.
+ */
+function vitePluginAnalytics(): Plugin {
+  return {
+    name: "proofpass-analytics",
+    transformIndexHtml(html) {
+      const endpoint = process.env.VITE_ANALYTICS_ENDPOINT?.trim();
+      const websiteId = process.env.VITE_ANALYTICS_WEBSITE_ID?.trim();
+      if (!endpoint || !websiteId) return html;
+      return {
+        html,
+        tags: [{ tag: "script", attrs: { defer: true, src: `${endpoint}/umami`, "data-website-id": websiteId }, injectTo: "body" }],
+      };
+    },
+  };
+}
+
+const plugins = [react(), tailwindcss(), wasm(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector(), vitePluginAnalytics()];
 
 // The generated Compact module imports `@midnight-ntwrk/compact-runtime` by bare
 // specifier, which a raw `import(url)` in the browser cannot resolve — so it has
@@ -191,7 +214,10 @@ export default defineConfig({
   },
   server: {
     host: true,
+    // A tunnel arrives with a Host the dev server has never heard of, and Vite
+    // answers "Blocked request" — so the list is extendable without editing it.
     allowedHosts: [
+      ...(process.env.VITE_ALLOWED_HOSTS ?? "").split(",").map((host) => host.trim()).filter(Boolean),
       ".manuspre.computer",
       ".manus.computer",
       ".manus-asia.computer",
