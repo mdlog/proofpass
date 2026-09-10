@@ -282,3 +282,62 @@ kbd { border: 1px solid #d9e2e2; background: #f6f8f8; border-radius: 4px; paddin
 .dark .button-danger:hover:not(:disabled) { border-color: #7a4d41; background: #452b25; }
 .live-dot-idle { background: #9fb3b2; box-shadow: none; animation: none; }
 .dark .live-dot-idle { background: #5d7877; }
+
+/* --- On-chain workflow: the three-party story as the layout ---------------
+   The panel used to be five stacked sections of equal weight, with the actions
+   last. Roles are columns now, the ledger reads as one strip of evidence, and
+   the plumbing sits behind a summary so it is present without being loud. */
+.role-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; align-items: start; }
+.role-column { padding: 21px 20px 18px; display: flex; flex-direction: column; gap: 13px; }
+.role-column .panel-heading { margin: 0; }
+.role-column .request-field { margin: 0; }
+.role-column .modal-actions { justify-content: flex-start; margin: 0; flex-wrap: wrap; }
+.role-column .modal-note { margin: 2px 0 0; }
+
+.contract-strip { padding: 18px 20px 16px; margin-bottom: 12px; }
+.contract-strip-top { display: flex; align-items: flex-end; gap: 12px; }
+.contract-address { flex: 1; min-width: 0; }
+.contract-address input { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11px; }
+
+/* One row of numbers the chain reported, not six cards competing for attention. */
+.evidence-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 14px; }
+.evidence-strip > div { padding: 9px 11px; border: 1px solid #e6eeed; border-radius: 10px; background: #fbfdfd; }
+.evidence-strip span { display: block; color: #8a9a9b; font-size: 9px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.evidence-strip strong { display: block; margin-top: 3px; color: #24484c; font-family: "Space Grotesk", sans-serif; font-size: 17px; letter-spacing: -.03em; }
+
+.role-control-stack { grid-template-columns: 1fr 1fr; }
+
+.step-list { display: grid; gap: 2px; margin-top: auto; padding-top: 4px; }
+.step-action { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid #edf1f1; }
+.step-action-copy { flex: 1; min-width: 0; }
+.step-action-copy strong { display: block; color: #33565a; font-size: 11px; }
+.step-action-copy small { display: block; margin-top: 2px; color: #8e9d9e; font-size: 9px; line-height: 1.35; }
+.step-action .button { min-height: 30px; padding: 0 13px; font-size: 11px; }
+
+.diagnostics { padding: 0; }
+.diagnostics > summary { padding: 15px 21px; cursor: pointer; color: #5c7276; font-size: 11px; font-weight: 650; list-style: none; }
+.diagnostics > summary::-webkit-details-marker { display: none; }
+.diagnostics > summary::before { content: "▸ "; color: #9aabac; }
+.diagnostics[open] > summary::before { content: "▾ "; }
+.diagnostics > summary:hover { color: #23726d; }
+.diagnostics > *:not(summary) { padding: 0 21px; }
+.diagnostics > *:last-child { padding-bottom: 6px; }
+.diagnostics code { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 10px; }
+
+.dark .evidence-strip > div { border-color: #294145; background: #14262a; }
+.dark .evidence-strip strong { color: #d9eceb; }
+.dark .step-action { border-color: #294145; }
+.dark .step-action-copy strong { color: #cfe4e2; }
+.dark .diagnostics > summary { color: #9ab4b2; }
+
+@media (max-width: 1180px) {
+  .role-columns { grid-template-columns: 1fr; }
+  .evidence-strip { grid-template-columns: repeat(2, 1fr); }
+  .contract-strip-top { flex-direction: column; align-items: stretch; }
+}
+
+/* The only workspace whose actions reach the contract, sitting beside two that
+   do not — the badge is what keeps them from being mistaken for each other. */
+.nav-live { margin-left: auto; padding: 2px 6px; border-radius: 5px; background: #dff4ee; color: #1d7a70; font-size: 8px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.nav-item-active .nav-live { background: rgba(255, 255, 255, .18); color: #eafaf6; }
+.dark .nav-live { background: #17403a; color: #74c9ba; }

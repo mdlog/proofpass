@@ -176,6 +176,26 @@ describe("Settings", () => {
   });
 });
 
+describe("sidebar", () => {
+  /**
+   * The status line read "Demo mode" permanently, which stopped being true once
+   * most of the app read from the store and the contract. It reports the wallet,
+   * which is the thing that actually decides whether anything can be signed.
+   */
+  it("reports the wallet rather than claiming demo mode forever", async () => {
+    renderApp();
+    // The wallet picker names wallets too; this is the sidebar's status line.
+    await waitFor(() => expect(document.querySelector(".network-mode")?.textContent).toMatch(/no wallet/i));
+    expect(document.querySelector(".network-mode")?.textContent).not.toMatch(/demo mode/i);
+  });
+
+  it("marks the one workspace that touches the contract", async () => {
+    renderApp();
+    const entry = (await screen.findByRole("button", { name: /^On-chain workflow/ }));
+    expect(entry.textContent).toMatch(/live/i);
+  });
+});
+
 describe("workspace navigation", () => {
   /**
    * The breadcrumb was hardcoded to "Overview", so every page claimed to be a

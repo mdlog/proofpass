@@ -1,4 +1,4 @@
-import { BadgeCheck, Blocks, KeyRound, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { BadgeCheck, Building2, KeyRound, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { lastDeployedContract } from "../lib/deployedContract";
@@ -262,110 +262,116 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
   const stepAvailability = (step: WorkflowStep) => (step === "prove" ? holderSteps : issuerSteps)?.[step];
   const expiry = new Date(Number(draft.expiresAt) * 1000);
 
+  const stepButton = (step: WorkflowStep, label: string, hint: string) => {
+    const availability = stepAvailability(step);
+    const ready = Boolean(availability?.ready);
+    return <div className="step-action" key={step}>
+      <span className={`activity-icon ${ready ? "activity-approved" : "activity-revoked"}`}>{ready ? <BadgeCheck size={14} /> : <XCircle size={14} />}</span>
+      <span className="step-action-copy"><strong>{label}</strong><small>{availability?.reason ?? hint}</small></span>
+      <button className="button button-primary" onClick={() => void runStep(step)} disabled={busy !== null || !ready}>{busy === step ? "…" : "Run"}</button>
+    </div>;
+  };
+
+  const thisIssuer = snapshot && identity
+    ? snapshot.issuers.find((entry) => entry.id === bytesToHex(identity.issuerId))?.status ?? "UNREGISTERED"
+    : "—";
+  const challengeHex = challenge.trim().replace(/^0x/i, "").toLowerCase();
+  const challengeSpent = Boolean(snapshot && pastedChallenge && snapshot.spentNonces.includes(challengeHex));
+
   return <div className="page-content role-page">
     <div className="section-heading">
       <div>
         <p className="eyebrow">On-chain workflow</p>
         <h1>Run it against the real contract</h1>
-        <p className="section-description">Every step is a transaction the wallet signs, and every result is read back from the ledger. Nothing on this page is demo data.</p>
+        <p className="section-description">Three parties, one contract. Only a commitment and a challenge ever cross between them — both public, neither reversible into the secret behind it.</p>
       </div>
       <button className={`connector-state ${walletSession ? "connector-live" : ""}`} onClick={walletSession ? undefined : onConnect}>{walletSession ? "Wallet ready" : "Connect wallet"}</button>
     </div>
 
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Deployed contract</p><h2>Contract under test</h2></div><Blocks size={19} className="muted-icon" /></div>
-      <label className="request-field"><span>Contract address</span><input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="0200…" spellCheck={false} /></label>
-      <label className="request-field"><span>Issuer slug — the on-chain id is its digest</span><input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} list="registry-issuer-slugs" /><datalist id="registry-issuer-slugs">{issuers.map((issuer) => <option key={issuer.id} value={issuer.slug}>{issuer.displayName}</option>)}</datalist><small>{registryIssuer
-        ? `Registry: ${registryIssuer.displayName} — credentials will be recorded against it.`
-        : canRegisterIssuer
-          ? `Registry: no issuer with this slug. Register "${issuerDisplayName(draft.slug)}" to record credentials against it.`
-          : "Registry: no issuer with this slug. The workflow still runs; the credential is not recorded."}</small></label><label className="request-field"><span>Credential title — metadata, never on the ledger</span><input value={draft.title} onChange={(event) => { const next = { ...draft, title: event.target.value }; rememberCredentialDraft(next); setDraft(next); }} spellCheck={false} /></label>
-      <div className="role-control-list">
-        <div><span>Issuer id</span><strong>{identity ? short(bytesToHex(identity.issuerId)) : "—"}</strong></div>
-        <div><span>Commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
-        <div><span>Expires</span><strong>{expiry.toISOString().replace("T", " ").slice(0, 19)}Z</strong></div>
-      </div>
-      {identityError && <p className="modal-note"><XCircle size={14} /> {identityError}</p>}
-      {blocker && <p className="modal-note"><XCircle size={14} /> {blocker}{!walletSession && <> <button className="text-button" onClick={onConnect}>Connect wallet</button></>}</p>}
-      <div className="modal-actions">
-        {!registryIssuer && canRegisterIssuer && <button className="button button-ghost" onClick={() => void registerIssuerRow()} disabled={busy !== null}><BadgeCheck size={15} /> Register this issuer</button>}
-        <button className="button button-ghost" onClick={() => startDraft(draft.slug)} disabled={busy !== null}><KeyRound size={15} /> Start a new credential</button>
+    <section className="panel contract-strip">
+      <div className="contract-strip-top">
+        <label className="request-field contract-address"><span>Contract</span>
+          <input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="0200…" spellCheck={false} />
+        </label>
         <button className="button button-light" onClick={() => void readLedger()} disabled={busy !== null || blocker !== null}><RefreshCw size={15} /> {busy === "read" ? "Reading…" : "Read ledger"}</button>
       </div>
-      <p className="modal-note">A revoked commitment can never be reissued, so running the workflow again needs a new credential.</p>
+      {blocker
+        ? <p className="modal-note"><XCircle size={14} /> {blocker}{!walletSession && <> <button className="text-button" onClick={onConnect}>Connect wallet</button></>}</p>
+        : <div className="evidence-strip">
+            <div><span>This issuer</span><strong>{thisIssuer}</strong></div>
+            <div><span>Credentials</span><strong>{snapshot ? snapshot.credentials.length : "—"}</strong></div>
+            <div><span>Revoked</span><strong>{snapshot ? snapshot.revokedCredentials.length : "—"}</strong></div>
+            <div><span>Proofs accepted</span><strong>{snapshot ? snapshot.acceptedProofs.toString() : "—"}</strong></div>
+            <div><span>Challenges spent</span><strong>{snapshot ? snapshot.spentNonces.length : "—"}</strong></div>
+          </div>}
     </section>
 
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Wallet endpoints</p><h2>Where this proves and reads</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
-      <div className="role-control-list">{walletEndpoints(walletSession?.configuration, resolveProofServerUri()).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}</div>
+    <div className="role-columns">
+      <section className="panel role-column">
+        <div className="panel-heading"><div><p className="eyebrow">Issuer · authority key</p><h2>Publishes the registry</h2></div><Building2 size={19} className="muted-icon" /></div>
+        <label className="request-field"><span>Issuer slug</span>
+          <input value={draft.slug} onChange={(event) => startDraft(event.target.value)} spellCheck={false} list="registry-issuer-slugs" />
+          <datalist id="registry-issuer-slugs">{issuers.map((issuer) => <option key={issuer.id} value={issuer.slug}>{issuer.displayName}</option>)}</datalist>
+          <small>{registryIssuer ? `Recorded against ${registryIssuer.displayName}.` : canRegisterIssuer ? "No registry row for this slug." : "Credentials will not be recorded without a session."}</small>
+        </label>
+        {!registryIssuer && canRegisterIssuer && <button className="text-button" onClick={() => void registerIssuerRow()} disabled={busy !== null}>Register &ldquo;{issuerDisplayName(draft.slug)}&rdquo; in the registry</button>}
+        <label className="request-field"><span>Credential title</span>
+          <input value={draft.title} onChange={(event) => { const next = { ...draft, title: event.target.value }; rememberCredentialDraft(next); setDraft(next); }} spellCheck={false} />
+        </label>
+        <label className="request-field"><span>Holder&apos;s commitment</span>
+          <input value={externalCommitment} onChange={(event) => setExternalCommitment(event.target.value)} placeholder="paste, or leave empty for your own" spellCheck={false} />
+          <small>{commitmentInvalid ? "Not 32 bytes of hex." : pastedCommitment ? "Issue and Revoke act on this." : "Empty: acts on this browser&apos;s own commitment."}</small>
+        </label>
+        <div className="step-list">
+          {stepButton("register", "Register issuer", "Publishes the issuer id")}
+          {stepButton("issue", "Issue credential", "Publishes the commitment")}
+          {stepButton("revoke", "Revoke credential", "Retires it, one way")}
+        </div>
+      </section>
+
+      <section className="panel role-column">
+        <div className="panel-heading"><div><p className="eyebrow">Holder · holder key</p><h2>Proves without showing</h2></div><KeyRound size={19} className="muted-icon" /></div>
+        <div className="role-control-list role-control-stack">
+          <div><span>My commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
+          <div><span>Valid until</span><strong>{expiry.toISOString().replace("T", " ").slice(0, 16)}Z</strong></div>
+        </div>
+        <div className="modal-actions">
+          <button className="button button-ghost" disabled={!identity} onClick={() => identity && void copyValue("Commitment", bytesToHex(identity.commitment))}>Copy commitment</button>
+          <button className="button button-ghost" onClick={() => startDraft(draft.slug)} disabled={busy !== null}>New credential</button>
+        </div>
+        <label className="request-field"><span>Challenge to prove with</span>
+          <input value={challenge} onChange={(event) => setChallenge(event.target.value)} placeholder="paste the verifier&apos;s challenge" spellCheck={false} />
+          <small>{challengeInvalid ? "Not 32 bytes of hex." : pastedChallenge ? "The proof will be bound to this challenge." : "Empty: a fresh nonce, bound to nobody&apos;s request."}</small>
+        </label>
+        <div className="step-list">
+          {stepButton("prove", "Prove eligibility", "Proves knowledge of the secret")}
+        </div>
+        {identityError && <p className="modal-note"><XCircle size={14} /> {identityError}</p>}
+      </section>
+
+      <section className="panel role-column">
+        <div className="panel-heading"><div><p className="eyebrow">Verifier</p><h2>Checks the chain</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
+        <div className="role-control-list role-control-stack">
+          <div><span>Challenge</span><strong>{pastedChallenge ? short(challengeHex) : "none yet"}</strong></div>
+          <div><span>On chain</span><strong>{!pastedChallenge ? "—" : !snapshot ? "read the ledger" : challengeSpent ? "used" : "not used yet"}</strong></div>
+        </div>
+        <div className="modal-actions">
+          <button className="button button-ghost" onClick={() => { const next = bytesToHex(freshNonce()); setChallenge(next); void copyValue("Challenge", next); }}>New challenge</button>
+        </div>
+        <p className="modal-note">{challengeSpent
+          ? "A holder proved for this exact challenge. Nothing here was taken on trust — the ledger says so."
+          : "Give the challenge to the holder, then read the ledger again. A used challenge is the proof that it was answered for you."}</p>
+      </section>
+    </div>
+
+    <details className="panel diagnostics">
+      <summary>Diagnostics &mdash; fees, endpoints, and the fifth circuit</summary>
       <div className="role-control-list">
-        <div><span>DUST balance</span><strong>{dust ? `${dust.balance} of ${dust.cap}` : "read the ledger to load"}</strong></div>
+        <div><span>DUST balance</span><strong>{dust ? `${dust.balance} of ${dust.cap}` : "read the ledger"}</strong></div>
+        {walletEndpoints(walletSession?.configuration, resolveProofServerUri()).map((entry) => <div key={entry.label}><span>{entry.label}</span><strong>{entry.value}</strong></div>)}
       </div>
       {dust && dustBlocker(dust) && <p className="modal-note"><XCircle size={14} /> {dustBlocker(dust)}</p>}
-      <p className="modal-note">Proving runs inside the wallet against its own prover — a step that fails with "Failed to fetch" failed to reach one of these.</p>
-    </section>
-
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Ledger state</p><h2>What the chain says</h2></div><ShieldCheck size={19} className="muted-icon" /></div>
-      {snapshot
-        ? <div className="role-control-list">
-            <div><span>Registered issuers</span><strong>{snapshot.issuers.length}</strong></div>
-            <div><span>This issuer</span><strong>{snapshot.issuers.find((entry) => identity && entry.id === bytesToHex(identity.issuerId))?.status ?? "UNREGISTERED"}</strong></div>
-            <div><span>Credentials in the vault</span><strong>{snapshot.credentials.length}</strong></div>
-            <div><span>Revoked credentials</span><strong>{snapshot.revokedCredentials.length}</strong></div>
-            <div><span>Accepted proofs</span><strong>{snapshot.acceptedProofs.toString()}</strong></div>
-            <div><span>Spent nonces</span><strong>{snapshot.spentNonces.length}</strong></div>
-          </div>
-        : <p className="modal-note">Read the ledger to see the contract's current state.</p>}
-    </section>
-
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Three-party exchange</p><h2>What crosses between them</h2></div><KeyRound size={19} className="muted-icon" /></div>
-      <p className="modal-note">Only two values ever cross: a commitment and a challenge. Both are public, and neither can be turned back into the secret behind it. Leave these empty to walk the whole flow in one browser.</p>
-
-      <div className="role-control-list">
-        <div><span>As holder — your commitment</span><strong>{identity ? short(bytesToHex(identity.commitment)) : "—"}</strong></div>
-      </div>
-      <div className="modal-actions">
-        <button className="button button-ghost" disabled={!identity} onClick={() => identity && void copyValue("Commitment", bytesToHex(identity.commitment))}>Copy my commitment</button>
-      </div>
-      <p className="modal-note">Computed here from your own secret, which never leaves this browser. Give it to the issuer; they publish it without ever learning the secret.</p>
-
-      <label className="request-field"><span>As issuer — a holder&apos;s commitment to publish</span>
-        <input value={externalCommitment} onChange={(event) => setExternalCommitment(event.target.value)} placeholder="paste a commitment, or leave empty to use your own" spellCheck={false} />
-        <small>{commitmentInvalid ? "Not 32 bytes of hex." : pastedCommitment ? "Issue and Revoke will act on this one." : "Empty: Issue and Revoke act on your own commitment above."}</small>
-      </label>
-
-      <label className="request-field"><span>As verifier — challenge for this presentation</span>
-        <input value={challenge} onChange={(event) => setChallenge(event.target.value)} placeholder="generate one, or paste the verifier&apos;s" spellCheck={false} />
-        <small>{challengeInvalid
-          ? "Not 32 bytes of hex."
-          : !pastedChallenge
-            ? "Empty: Prove uses a fresh nonce, which binds the proof to nobody's request."
-            : !snapshot
-              ? "Read the ledger to check whether it has been used."
-              : snapshot.spentNonces.includes(challenge.trim().replace(/^0x/i, "").toLowerCase())
-                ? "Used on chain — a holder proved for this exact challenge."
-                : "Not used yet. Give it to the holder and read the ledger again afterwards."}</small>
-      </label>
-      <div className="modal-actions">
-        <button className="button button-ghost" onClick={() => { const next = bytesToHex(freshNonce()); setChallenge(next); void copyValue("Challenge", next); }}>New challenge</button>
-      </div>
-    </section>
-
-    <section className="panel">
-      <div className="panel-heading"><div><p className="eyebrow">Workflow</p><h2>Four steps, in order</h2></div><BadgeCheck size={19} className="muted-icon" /></div>
-      {STEPS.map((step) => {
-        const availability = stepAvailability(step.id);
-        return <div className="role-event" key={step.id}>
-          <div className={`activity-icon ${availability?.ready ? "activity-approved" : "activity-revoked"}`}>{availability?.ready ? <BadgeCheck size={15} /> : <XCircle size={15} />}</div>
-          <div><strong>{step.label}</strong><p>{availability?.reason ?? step.hint} · {step.role} key</p></div>
-          <button className="button button-primary" onClick={() => void runStep(step.id)} disabled={busy !== null || !availability?.ready}>{busy === step.id ? "Submitting…" : "Run"}</button>
-        </div>;
-      })}
-      {!snapshot && <p className="modal-note">{blocker ?? "Press Read ledger — the chain decides which steps are possible, not this panel."}</p>}
-      {commitmentInvalid && <p className="modal-note"><XCircle size={14} /> The pasted commitment is not 32 bytes of hex.</p>}
-      <p className="modal-note">The contract's fifth circuit, <code>revokeIssuer</code>, is off this path: it would stop the issuer from issuing anything further.</p>
-    </section>
+      <p className="modal-note">Proving runs against the prover above; a step that fails with &ldquo;Failed to fetch&rdquo; failed to reach one of these. The contract&apos;s fifth circuit, <code>revokeIssuer</code>, is off this path: it would stop the issuer issuing anything further.</p>
+    </details>
   </div>;
 }
