@@ -183,3 +183,25 @@ export function preferStored<T>(stored: T[], seeded: T[]): T[] {
   return stored.length > 0 ? stored : seeded;
 }
 
+
+/**
+ * Verifications per day, oldest bucket first.
+ *
+ * The Activity chart was eight hardcoded bar heights carrying no label. A chart
+ * reads as data by its shape, so an unlabelled fabricated one misleads more than
+ * a badged number ever could. Verifications carry `verifiedAt`, which is enough
+ * to count — and a sparse chart is the honest answer when little has happened.
+ */
+export function verificationTrend(rows: { verifiedAt: Date | string }[], days: number, now: Date = new Date()): number[] {
+  const buckets = new Array<number>(days).fill(0);
+  const endOfToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + 86_400_000;
+  for (const row of rows) {
+    const at = new Date(row.verifiedAt).getTime();
+    if (Number.isNaN(at)) continue;
+    // How many whole days back from the end of today the row sits.
+    const daysAgo = Math.floor((endOfToday - at) / 86_400_000);
+    if (daysAgo < 0 || daysAgo >= days) continue;
+    buckets[days - 1 - daysAgo] += 1;
+  }
+  return buckets;
+}

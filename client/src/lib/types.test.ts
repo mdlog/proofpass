@@ -9,6 +9,7 @@ import {
   toDisplayCredential,
   toDisplayRequest,
   preferStored,
+  verificationTrend,
   type CredentialView,
   type ProofRequestView,
   type ServerProofRequest,
@@ -231,5 +232,45 @@ describe("preferStored", () => {
     const demo = { seeded: true, title: "seeded" } as CredentialView;
     expect(preferStored([held], [demo, demo])).toEqual([held]);
     expect(preferStored([], [demo])).toEqual([demo]);
+  });
+});
+
+/**
+ * The Activity chart was eight hardcoded bar heights with no label on it. A
+ * chart reads as data by its shape, so an unlabelled fabricated one misleads
+ * more than a number ever could. Verifications carry `verifiedAt`, so the trend
+ * is countable from what is stored.
+ */
+describe("verificationTrend", () => {
+  const now = new Date("2026-09-10T12:00:00.000Z");
+  const at = (iso: string) => ({ verifiedAt: iso });
+
+  it("returns one bucket per day asked for", () => {
+    expect(verificationTrend([], 7, now)).toHaveLength(7);
+  });
+
+  it("is all zero when nothing was verified, rather than an invented shape", () => {
+    expect(verificationTrend([], 7, now)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("puts today in the last bucket, which is how a trend reads", () => {
+    expect(verificationTrend([at("2026-09-10T09:00:00.000Z")], 7, now).at(-1)).toBe(1);
+  });
+
+  it("counts several on the same day together", () => {
+    const rows = [at("2026-09-10T01:00:00.000Z"), at("2026-09-10T23:00:00.000Z")];
+    expect(verificationTrend(rows, 7, now).at(-1)).toBe(2);
+  });
+
+  it("places an older row in an earlier bucket", () => {
+    expect(verificationTrend([at("2026-09-08T12:00:00.000Z")], 7, now)).toEqual([0, 0, 0, 0, 1, 0, 0]);
+  });
+
+  it("ignores anything outside the window rather than piling it on the edge", () => {
+    expect(verificationTrend([at("2025-01-01T00:00:00.000Z")], 7, now)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("survives a row with an unreadable timestamp", () => {
+    expect(verificationTrend([{ verifiedAt: "not a date" }], 7, now)).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 });
