@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IssuerStatus } from "@compact/proofpass";
-import { availableSteps, callsOf, connectProofPass, dustBlocker, issuerDisplayName, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, PRIVATE_STATE_ID, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
+import { availableSteps, callsOf, connectProofPass, dustBlocker, issuerDisplayName, privateStateIdFor, credentialCommitmentFor, fetchLedgerSnapshot, lastCredentialDraft, ledgerReadBlocker, rememberCredentialDraft, deriveIssuerId, expirySecondsFromNow, freshNonce, readLedgerSnapshot, resolveHolderSecret, walletEndpoints } from "./proofpassContract";
 
 /**
  * `localSecretKey()` is both the authority secret (via `assertAuthority`) and
@@ -16,7 +16,22 @@ const fakeStore = () => {
 
 describe("role separation", () => {
   it("keeps the holder's private state apart from the authority's", () => {
-    expect(PRIVATE_STATE_ID.holder).not.toBe(PRIVATE_STATE_ID.authority);
+    expect(privateStateIdFor("holder", "preprod")).not.toBe(privateStateIdFor("authority", "preprod"));
+  });
+
+  /**
+   * Private state carries the secret a commitment is built from. Sharing a store
+   * across networks means a preprod secret is what a preview contract's
+   * authority hash is derived from — two chains, one key, and no way to tell
+   * which contract a given store belongs to.
+   */
+  it("keeps each network's private state apart", () => {
+    expect(privateStateIdFor("authority", "preprod")).not.toBe(privateStateIdFor("authority", "preview"));
+    expect(privateStateIdFor("holder", "preprod")).not.toBe(privateStateIdFor("holder", "preview"));
+  });
+
+  it("names the network in the id, so a store can be told apart by eye", () => {
+    expect(privateStateIdFor("authority", "preprod")).toContain("preprod");
   });
 
   it("generates a holder secret of the 32 bytes the circuit expects", () => {
@@ -209,25 +224,25 @@ describe("connectProofPass", () => {
 
   it("reaches the authority's private state when acting as the authority", async () => {
     const { calls, deps } = spyDeps();
-    await connectProofPass({}, ADDRESS, "authority", secret, deps as never);
-    expect(calls[0].options.privateStateId).toBe(PRIVATE_STATE_ID.authority);
+    await connectProofPass({}, { contractAddress: ADDRESS, role: "authority", secret, networkId: "preprod" }, deps as never);
+    expect(calls[0].options.privateStateId).toBe(privateStateIdFor("authority", "preprod"));
   });
 
   it("reaches the holder's private state when proving, which is a different secret", async () => {
     const { calls, deps } = spyDeps();
-    await connectProofPass({}, ADDRESS, "holder", secret, deps as never);
-    expect(calls[0].options.privateStateId).toBe(PRIVATE_STATE_ID.holder);
+    await connectProofPass({}, { contractAddress: ADDRESS, role: "holder", secret, networkId: "preprod" }, deps as never);
+    expect(calls[0].options.privateStateId).toBe(privateStateIdFor("holder", "preprod"));
   });
 
   it("seeds the role's own secret, so the witness returns the right one", async () => {
     const { calls, deps } = spyDeps();
-    await connectProofPass({}, ADDRESS, "holder", secret, deps as never);
+    await connectProofPass({}, { contractAddress: ADDRESS, role: "holder", secret, networkId: "preprod" }, deps as never);
     expect(calls[0].options.initialPrivateState).toEqual({ secret });
   });
 
   it("connects to the address given, not to a fresh deploy", async () => {
     const { calls, deps } = spyDeps();
-    await connectProofPass({}, ADDRESS, "authority", secret, deps as never);
+    await connectProofPass({}, { contractAddress: ADDRESS, role: "authority", secret, networkId: "preprod" }, deps as never);
     expect(calls[0].options.contractAddress).toBe(ADDRESS);
   });
 });

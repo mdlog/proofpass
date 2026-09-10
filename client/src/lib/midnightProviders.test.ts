@@ -210,7 +210,9 @@ describe("buildMidnightProviders wallet capabilities", () => {
       getProvingProvider: async () => ({}),
       getConfiguration: async () => { throw new Error("reached getConfiguration"); },
     } as unknown as WalletBridgeApi;
-    await expect(buildMidnightProviders(api)).rejects.toThrow(/reached getConfiguration/);
+    // An origin, because the default proof server is a same-origin path and
+    // there is no `location` outside a browser.
+    await expect(buildMidnightProviders(api, { origin: "https://proofpass.example" })).rejects.toThrow(/reached getConfiguration/);
   });
 });
 
@@ -327,38 +329,49 @@ describe("private state", () => {
   });
 
   it("builds a provider with the methods the deploy calls once the transaction lands", () => {
-    const provider = createPrivateStateProvider("mn_shield-cpk_test1abc", fakeStore());
+    const provider = createPrivateStateProvider("mn_shield-cpk_test1abc", "preprod", fakeStore());
     for (const method of ["setContractAddress", "set", "get", "setSigningKey", "getSigningKey"] as const) {
       expect(typeof provider[method]).toBe("function");
     }
   });
 
   it("refuses to build without a wallet account, so two wallets cannot share a store", () => {
-    expect(() => createPrivateStateProvider("", fakeStore())).toThrow(/accountId/);
+    expect(() => createPrivateStateProvider("", "preprod", fakeStore())).toThrow(/accountId/);
   });
 });
 
 
 describe("resolveProofServerUri", () => {
+  const ORIGIN = "https://proofpass.example";
+
+  /**
+   * The browser must not reach the prover directly: Lace's service worker
+   * refuses a page fetch to 127.0.0.1, so the default is a same-origin path the
+   * server forwards. It also keeps the prover off the public internet.
+   */
+  it("defaults to the same-origin path the server proxies", () => {
+    expect(resolveProofServerUri(undefined, ORIGIN)).toBe(`${ORIGIN}/proof-server`);
+  });
+
+  it("resolves any relative path against the page, since the provider needs absolute", () => {
+    expect(resolveProofServerUri("/elsewhere", ORIGIN)).toBe(`${ORIGIN}/elsewhere`);
+  });
+
+  it("takes an absolute URL as given, for a prover somewhere else", () => {
+    expect(resolveProofServerUri("  https://prover.example  ", ORIGIN)).toBe("https://prover.example");
+  });
+
   /**
    * Explicit over ambient: reading the environment here would make the result
-   * depend on whoever's .env is on disk, which is how a test starts passing
-   * for the wrong reason.
+   * depend on whoever's .env is on disk, which is how a test starts passing for
+   * the wrong reason.
    */
-  it("reports none for an empty setting, so the wallet's prover is used", () => {
-    expect(resolveProofServerUri("")).toBeNull();
+  it("reports none for an emptied setting, so the wallet's own prover is used", () => {
+    expect(resolveProofServerUri("", ORIGIN)).toBeNull();
+    expect(resolveProofServerUri("   ", ORIGIN)).toBeNull();
   });
 
-  it("ignores whitespace rather than building a provider from a blank string", () => {
-    expect(resolveProofServerUri("   ")).toBeNull();
-  });
-
-  it("takes the configured server, trimmed", () => {
-    expect(resolveProofServerUri("  http://localhost:6300  ")).toBe("http://localhost:6300");
-  });
-
-  it("lets an explicit setting win over the environment, in either direction", () => {
-    expect(resolveProofServerUri("http://elsewhere:6300")).toBe("http://elsewhere:6300");
-    expect(resolveProofServerUri("")).toBeNull();
+  it("says what is missing rather than throwing a bare URL error", () => {
+    expect(() => resolveProofServerUri("/proof-server", "")).toThrow(/absolute/i);
   });
 });

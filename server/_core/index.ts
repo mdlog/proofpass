@@ -5,6 +5,8 @@ import { createServer } from "http";
 import net from "net";
 import { appRouter } from "../routers";
 import { allowZkAssetOrigin } from "../zkAssets";
+import { PROOF_SERVER_PATH, proofServerProxy } from "../proofServerProxy";
+import { ENV } from "./env";
 import { createContext } from "./context";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
@@ -33,6 +35,14 @@ async function startServer() {
   // its own extension origin, so they need a cross-origin header in dev and
   // production alike.
   app.use(allowZkAssetOrigin);
+
+  // Before the JSON parser, and with a raw body: a proving request is binary and
+  // megabytes wide. Lace's service worker refuses a page fetch to 127.0.0.1, so
+  // the browser reaches the prover through this same-origin path instead — which
+  // also keeps the prover off the public internet.
+  app.use(PROOF_SERVER_PATH, express.raw({ type: "*/*", limit: "64mb" }));
+  app.use(proofServerProxy({ upstream: ENV.proofServerUrl }));
+
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
 

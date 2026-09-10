@@ -1,5 +1,7 @@
 import type { WalletConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
-import { fromHex, toHex } from "@midnight-ntwrk/compact-runtime";
+// compact-runtime's own `toHex`/`fromHex` call the Buffer global without
+// importing it; midnight-js-utils imports it, so the bridge needs no polyfill.
+import { fromHex, toHex } from "@midnight-ntwrk/midnight-js-utils";
 import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
@@ -80,20 +82,37 @@ export type ProviderBundleOptions = {
   proofServerUri?: string;
 };
 
+/** The same-origin path server-side code forwards to the proof server. */
+export const DEFAULT_PROOF_SERVER_PATH = "/proof-server";
+
 /**
  * The proof server the app proves against, or null to use the wallet's.
  *
- * The hosted preprod prover sits behind a proxy that refuses request bodies
- * over a few kilobytes, while a circuit call has to upload a 2.7 MB proving
- * key — so every call fails there as an unexplained "Failed to fetch". Pointing
- * at a proof server of one's own is the way past it, and running that server
- * locally is also what keeps the proof preimage — which carries the witness —
- * on the same machine.
+ * The default is a same-origin path rather than the prover's own address. Lace
+ * runs a service worker that intercepts page-level fetches, and a request
+ * originating from that context to 127.0.0.1 is refused by Chrome outright — so
+ * pointing a dApp straight at `http://localhost:6300` works only by luck of
+ * which context the fetch lands in. A same-origin path passes through the worker
+ * and the server forwards it, which also keeps the prover off the public
+ * internet and the proof preimage — carrying the witness — off a second host.
+ *
+ * The wallet's own prover would be the natural choice, but the hosted preprod
+ * one sits behind a proxy refusing request bodies over a few kilobytes while a
+ * circuit call uploads a 2.7 MB proving key. Emptying the setting selects it
+ * anyway, for a network where that is fixed.
  */
-export function resolveProofServerUri(input?: string): string | null {
-  const configured = (input ?? (import.meta.env.VITE_PROOF_SERVER_URI as string | undefined))?.trim();
-  return configured || null;
+export function resolveProofServerUri(configured?: string, origin?: string): string | null {
+  const value = (configured ?? DEFAULT_PROOF_SERVER_PATH).trim();
+  if (!value) return null;
+  try {
+    return new URL(value).toString().replace(/\/$/, "");
+  } catch {
+    const base = origin ?? (typeof location === "undefined" ? undefined : location.origin);
+    if (!base) throw new Error(`Cannot resolve "${value}" without an origin; pass an absolute proof server URL.`);
+    return new URL(value, base).toString().replace(/\/$/, "");
+  }
 }
+
 
 /** Where `pnpm contracts:build` publishes `keys/` and `zkir/`. */
 export const DEFAULT_ZK_ASSETS_PATH = "/compact/proofpass";
@@ -230,9 +249,11 @@ export function resolvePrivateStatePassword(store: KeyValueStore = localStorage)
  * The store is scoped to the wallet account, which is what keeps two wallets in
  * the same browser from reading each other's state.
  */
-export function createPrivateStateProvider(accountId: string, store?: KeyValueStore) {
+export function createPrivateStateProvider(accountId: string, networkId: string, store?: KeyValueStore) {
   return levelPrivateStateProvider({
     accountId,
+    // One store per network, for the same reason the private state ids carry it.
+    privateStateStoreName: `proofpass-private-state-${networkId}`,
     privateStoragePasswordProvider: () => resolvePrivateStatePassword(store),
   });
 }
@@ -243,7 +264,7 @@ export function createPrivateStateProvider(accountId: string, store?: KeyValueSt
  * `getConfiguration()` — so nothing here hardcodes a network.
  */
 export async function buildMidnightProviders(api: WalletBridgeApi, options: ProviderBundleOptions = {}) {
-  const proofServerUri = resolveProofServerUri(options.proofServerUri);
+  const proofServerUri = resolveProofServerUri(options.proofServerUri ?? (import.meta.env.VITE_PROOF_SERVER_URI as string | undefined), options.origin);
 
   // Proving normally happens in the wallet (ARCHITECTURE §18), so a connector
   // that predates `getProvingProvider` cannot transact at all. Unguarded it
@@ -274,7 +295,7 @@ export async function buildMidnightProviders(api: WalletBridgeApi, options: Prov
     zkConfigProvider,
     proofProvider,
     publicDataProvider: indexerPublicDataProvider(configuration.indexerUri, configuration.indexerWsUri),
-    privateStateProvider: createPrivateStateProvider(shielded.shieldedCoinPublicKey),
+    privateStateProvider: createPrivateStateProvider(shielded.shieldedCoinPublicKey, configuration.networkId),
     walletProvider: walletProvider(shielded),
     midnightProvider,
   };

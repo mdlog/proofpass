@@ -7,6 +7,8 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  /** Where the proof server listens; the browser reaches it only through /proof-server. */
+  proofServerUrl: process.env.PROOF_SERVER_URL ?? "http://127.0.0.1:6300",
   midnightNetworkId: process.env.MIDNIGHT_NETWORK_ID ?? "preview",
   midnightCompactModulePath: process.env.MIDNIGHT_COMPACT_MODULE_PATH ?? "",
   midnightCompactAssetsPath: process.env.MIDNIGHT_COMPACT_ASSETS_PATH ?? "",

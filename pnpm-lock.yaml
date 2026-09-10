@@ -59,6 +59,9 @@ importers:
       '@midnight-ntwrk/midnight-js-types':
         specifier: 4.1.1
         version: 4.1.1
+      '@midnight-ntwrk/midnight-js-utils':
+        specifier: 4.1.1
+        version: 4.1.1
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
         version: 1.2.12(@types/react-dom@19.2.1(@types/react@19.2.1))(@types/react@19.2.1)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)

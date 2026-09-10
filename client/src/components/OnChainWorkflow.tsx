@@ -191,7 +191,8 @@ export function OnChainWorkflow({ walletSession, onConnect, issuers, onCredentia
       const unpayable = dustBlocker(balance);
       if (unpayable) throw new Error(unpayable);
       const secret = role === "holder" ? resolveHolderSecret().secret : resolveAuthoritySecret().secret;
-      const calls = callsOf(await connectProofPass(providers, address.trim(), role, secret));
+      const network = walletSession?.configuration?.networkId ?? "preprod";
+      const calls = callsOf(await connectProofPass(providers, { contractAddress: address.trim(), role, secret, networkId: network }));
       if (step === "register") await calls.registerIssuer(identity.issuerId);
       if (step === "issue") {
         await calls.issueCredential(identity.issuerId, identity.commitment);

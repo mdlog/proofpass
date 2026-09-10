@@ -30,17 +30,24 @@ function asBrowser<T>(body: () => T): T {
 }
 
 describe("Buffer in a browser", () => {
-  it("is what the Midnight hex helpers fail on when it is missing", () => {
+  /**
+   * The bridge used to encode with compact-runtime's `toHex`, which reaches for
+   * the global. midnight-js-utils imports Buffer properly, so the bridge no
+   * longer needs the polyfill at all — the packages that still do are
+   * platform-js and wallet-sdk-address-format, reached only through the ledger.
+   */
+  it("no longer needs the global at all, now the bridge uses the package that imports it", () => {
     asBrowser(() => {
-      expect(() => defaultBridgeDeps.encode(Uint8Array.from([0xde, 0xad]))).toThrow(/Buffer is not defined/);
+      expect(defaultBridgeDeps.encode(Uint8Array.from([0xde, 0xad]))).toBe("dead");
+      expect([...defaultBridgeDeps.decode("dead")]).toEqual([0xde, 0xad]);
     });
   });
 
-  it("lets the wallet bridge encode and decode once installed", () => {
+  it("still provides a Buffer that works, for the packages that do reach for it", () => {
     asBrowser(() => {
       installBufferGlobal();
-      expect(defaultBridgeDeps.encode(Uint8Array.from([0xde, 0xad]))).toBe("dead");
-      expect([...defaultBridgeDeps.decode("dead")]).toEqual([0xde, 0xad]);
+      const installed = (globalThis as { Buffer?: { from(input: string, encoding: string): { toString(encoding: string): string } } }).Buffer;
+      expect(installed?.from("dead", "hex").toString("hex")).toBe("dead");
     });
   });
 

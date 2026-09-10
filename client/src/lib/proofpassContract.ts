@@ -15,10 +15,18 @@ import { bytesToHex, hexToBytes } from "./hex";
 
 export type ContractRole = "authority" | "holder";
 
-export const PRIVATE_STATE_ID: Record<ContractRole, string> = {
-  authority: "proofpass",
-  holder: "proofpass:holder",
-};
+/**
+ * Where a role's private state lives, per network.
+ *
+ * Private state carries the secret a commitment is built from, so sharing one
+ * store across networks means a preprod secret is what a preview contract's
+ * authority hash is derived from — two chains, one key, and no way to tell which
+ * contract a store belongs to.
+ */
+export function privateStateIdFor(role: ContractRole, networkId: string): string {
+  const base = `proofpass-${networkId}`;
+  return role === "holder" ? `${base}:holder` : base;
+}
 
 const HOLDER_STORAGE_KEY = "proofpass:holder-secret";
 
@@ -201,17 +209,22 @@ export const defaultContractDeps: ContractDeps = {
  * private state, and its secret is written there on every connect so the store
  * cannot drift from the secrets this browser actually holds.
  */
+export type ConnectOptions = {
+  contractAddress: string;
+  role: ContractRole;
+  secret: Uint8Array;
+  networkId: string;
+};
+
 export async function connectProofPass(
   providers: unknown,
-  contractAddress: string,
-  role: ContractRole,
-  secret: Uint8Array,
+  { contractAddress, role, secret, networkId }: ConnectOptions,
   deps: ContractDeps = defaultContractDeps,
 ): Promise<FoundProofPass> {
   return deps.find(providers, {
     compiledContract: await deps.compiledContract(),
     contractAddress,
-    privateStateId: PRIVATE_STATE_ID[role],
+    privateStateId: privateStateIdFor(role, networkId),
     initialPrivateState: { secret },
   });
 }
