@@ -156,3 +156,17 @@ export function toDisplayCredential(row: StoredCredential, issuerName: string | 
     seeded: false,
   };
 }
+
+/**
+ * What the credential grid is actually showing.
+ *
+ * Stored cards and seeded ones sit side by side, and a badge on each is easy to
+ * skim past. Saying the split in a line above them means the page states what it
+ * is rather than leaving it to be inferred.
+ */
+export function credentialSummary(credentials: CredentialView[]): string {
+  const stored = credentials.filter((credential) => !credential.seeded).length;
+  const seeded = credentials.length - stored;
+  const held = stored === 0 ? "No stored credentials yet" : `${stored} stored credential${stored === 1 ? "" : "s"}`;
+  return seeded === 0 ? `${held}.` : `${held} · ${seeded} seeded card${seeded === 1 ? "" : "s"} below, kept so the page reads as populated.`;
+}

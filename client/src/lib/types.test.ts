@@ -5,7 +5,10 @@ import {
   isSeededRequest,
   parseRequestedAttributes,
   serverRequestId,
-  toDisplayCredential, toDisplayRequest,
+  credentialSummary,
+  toDisplayCredential,
+  toDisplayRequest,
+  type CredentialView,
   type ProofRequestView,
   type ServerProofRequest,
 } from "./types";
@@ -165,5 +168,33 @@ describe("toDisplayCredential", () => {
 
   it("survives a credential with no expiry", () => {
     expect(toDisplayCredential({ ...row, expiresAt: null }, "N").expires).toMatch(/no expiry/i);
+  });
+});
+
+/**
+ * The Credentials page shows stored cards and seeded ones in one grid. Saying
+ * which is which in a line above them is the difference between a page that is
+ * honest and a page that merely has honest badges on it.
+ */
+describe("credentialSummary", () => {
+  const seeded = { seeded: true } as CredentialView;
+  const stored = { seeded: false } as CredentialView;
+
+  it("says nothing is stored rather than implying the seeded ones are yours", () => {
+    expect(credentialSummary([seeded, seeded])).toMatch(/none.*stored|no stored/i);
+  });
+
+  it("counts stored and seeded separately once both are present", () => {
+    const summary = credentialSummary([stored, seeded, seeded]);
+    expect(summary).toMatch(/1 stored/);
+    expect(summary).toMatch(/2 (seeded|demo)/i);
+  });
+
+  it("stops mentioning seeded cards when there are none left", () => {
+    expect(credentialSummary([stored, stored])).not.toMatch(/seeded|demo/i);
+  });
+
+  it("says something for an empty grid rather than returning nothing", () => {
+    expect(credentialSummary([]).length).toBeGreaterThan(0);
   });
 });

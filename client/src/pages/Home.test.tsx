@@ -101,6 +101,20 @@ describe("Credentials page", () => {
   });
 });
 
+describe("Credentials page action", () => {
+  /**
+   * The button used to raise a toast promising "Your issuer invite link will
+   * appear here" — a link that does not exist. Credentials come from the
+   * on-chain workflow, so that is where it goes.
+   */
+  it("takes you to where a credential actually comes from", async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Credentials/ }));
+    await user.click(screen.getByRole("button", { name: /Issue on chain/i }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Run it against the real contract/);
+  });
+});
+
 describe("workspace navigation", () => {
   /**
    * The breadcrumb was hardcoded to "Overview", so every page claimed to be a
@@ -189,12 +203,17 @@ describe("toast feedback (ARCHITECTURE §14)", () => {
     expect(await screen.findByText(/sign-in is not configured|authenticated account/i)).toBeInTheDocument();
   });
 
-  it("surfaces a success toast for a demo-path action", async () => {
+  /**
+   * Re-pointed from the Credentials action, which used to raise a toast
+   * promising an issuer invite link that did not exist. That button now
+   * navigates to where credentials actually come from; Export is still a
+   * demo-path action, and the point here is that a toast reaches the screen.
+   */
+  it("surfaces a toast for a demo-path action", async () => {
     const user = renderApp();
-    await user.click(screen.getByRole("button", { name: /^Credentials/ }));
-    await user.click(await screen.findByRole("button", { name: /receive credential|add credential/i }));
-    // Asserted on the toast's description: its title repeats the button label.
-    expect(await screen.findByText(/your issuer invite link will appear here/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Activity/ }));
+    await user.click(await screen.findByRole("button", { name: /export/i }));
+    expect(await screen.findByText(/export is available in the production workspace/i)).toBeInTheDocument();
   });
 });
 
