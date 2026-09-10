@@ -6,6 +6,7 @@ import {
   parseRequestedAttributes,
   serverRequestId,
   credentialSummary,
+  disclosureSummary,
   toDisplayCredential,
   toDisplayRequest,
   preferStored,
@@ -272,5 +273,61 @@ describe("verificationTrend", () => {
 
   it("survives a row with an unreadable timestamp", () => {
     expect(verificationTrend([{ verifiedAt: "not a date" }], 7, now)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+/**
+ * "Privacy score 92/100" and "Data kept private 86%" were composites of nothing.
+ * What is measurable is what was actually disclosed, and what the ledger holds —
+ * which for attributes is nothing at all, because the contract stores only
+ * Bytes<32> commitments.
+ *
+ * Notably this build has no selective disclosure: approving sends every
+ * requested attribute, so withheld is 0. Reporting that plainly is the point;
+ * a ratio dressed up as minimisation would be the same lie in a new shape.
+ */
+describe("disclosureSummary", () => {
+  const request = (id: number, attrs: string[]) => ({ id, requestedAttributes: JSON.stringify(attrs) });
+  const verification = (proofRequestId: number, attrs: string[]) => ({
+    proofRequestId,
+    resultSummary: JSON.stringify({ consentVersion: "1.0", disclosedAttributes: attrs }),
+  });
+
+  it("counts the proofs actually shared", () => {
+    const s = disclosureSummary([request(1, ["a", "b"])], [verification(1, ["a", "b"])]);
+    expect(s.proofs).toBe(1);
+  });
+
+  it("counts attributes disclosed across every proof", () => {
+    const s = disclosureSummary(
+      [request(1, ["a", "b"]), request(2, ["c"])],
+      [verification(1, ["a", "b"]), verification(2, ["c"])],
+    );
+    expect(s.disclosed).toBe(3);
+  });
+
+  it("reports withheld attributes, which this build never has", () => {
+    const s = disclosureSummary([request(1, ["a", "b"])], [verification(1, ["a", "b"])]);
+    expect(s.requested).toBe(2);
+    expect(s.withheld).toBe(0);
+  });
+
+  it("counts a genuinely partial disclosure, should one ever exist", () => {
+    const s = disclosureSummary([request(1, ["a", "b", "c"])], [verification(1, ["a"])]);
+    expect(s.withheld).toBe(2);
+  });
+
+  it("is all zero before anything is shared, rather than a flattering default", () => {
+    expect(disclosureSummary([], [])).toEqual({ proofs: 0, disclosed: 0, requested: 0, withheld: 0 });
+  });
+
+  it("survives a summary that is not the JSON it should be", () => {
+    const s = disclosureSummary([request(1, ["a"])], [{ proofRequestId: 1, resultSummary: "not json" }]);
+    expect(s.proofs).toBe(1);
+    expect(s.disclosed).toBe(0);
+  });
+
+  it("ignores a verification whose request is gone", () => {
+    expect(disclosureSummary([], [verification(9, ["a"])]).requested).toBe(0);
   });
 });

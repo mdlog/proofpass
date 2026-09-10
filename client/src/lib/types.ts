@@ -205,3 +205,47 @@ export function verificationTrend(rows: { verifiedAt: Date | string }[], days: n
   }
   return buckets;
 }
+
+export type DisclosureSummary = {
+  /** Proofs shared. */
+  proofs: number;
+  /** Attributes actually handed over, across all of them. */
+  disclosed: number;
+  /** Attributes the verifiers asked for. */
+  requested: number;
+  /** Asked for and not given. Zero in this build: approving sends all of them. */
+  withheld: number;
+};
+
+/**
+ * What was actually disclosed, counted from what is stored.
+ *
+ * This replaces a "privacy score" and a "data kept private" percentage that were
+ * composites of nothing. Every figure here comes from a row: the consent record
+ * written on approval names the attributes disclosed, and the request names the
+ * ones asked for.
+ *
+ * `withheld` is reported even though this build always leaves it at zero —
+ * approving sends every requested attribute, because there is no selective
+ * disclosure. Saying so is the point. A ratio dressed up as minimisation would
+ * be the same invention in a new shape.
+ */
+export function disclosureSummary(
+  requests: { id: number; requestedAttributes: string }[],
+  verifications: { proofRequestId: number; resultSummary: string | null }[],
+): DisclosureSummary {
+  const requestedBy = new Map(requests.map((request) => [request.id, parseRequestedAttributes(request.requestedAttributes).length]));
+  let disclosed = 0;
+  let requested = 0;
+  for (const verification of verifications) {
+    requested += requestedBy.get(verification.proofRequestId) ?? 0;
+    try {
+      const parsed = JSON.parse(verification.resultSummary ?? "") as { disclosedAttributes?: unknown };
+      if (Array.isArray(parsed.disclosedAttributes)) disclosed += parsed.disclosedAttributes.length;
+    } catch {
+      // A summary that is not the JSON it should be counts as nothing disclosed
+      // rather than as a number invented to fill the gap.
+    }
+  }
+  return { proofs: verifications.length, disclosed, requested, withheld: Math.max(requested - disclosed, 0) };
+}

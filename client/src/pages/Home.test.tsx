@@ -79,9 +79,23 @@ describe("Overview metrics", () => {
     expect(card?.textContent).not.toMatch(/Demo/);
   });
 
-  it("keeps the Demo label on the figure that has no definition yet", () => {
+  /**
+   * "Data kept private 86%" measured nothing. What is true and checkable is that
+   * the contract's ledger fields are Bytes<32> sets and maps — an attribute
+   * cannot be stored there at all.
+   */
+  it("replaces the invented percentage with a fact about the ledger", () => {
     renderApp();
-    expect(metricCard(/Data kept private/)?.textContent).toMatch(/Demo/);
+    expect(metricCard(/Data kept private/)).toBeUndefined();
+    const card = metricCard(/Attributes on chain/);
+    expect(card?.textContent).toMatch(/0/);
+    expect(card?.textContent).not.toMatch(/Demo/);
+  });
+
+  it("no longer scores privacy out of a hundred it never measured", () => {
+    renderApp();
+    expect(screen.queryByText(/92/)).toBeNull();
+    expect(screen.queryByText(/privacy score/i)).toBeNull();
   });
 
   it("shows no block height rather than an invented one", () => {
