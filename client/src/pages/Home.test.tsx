@@ -115,6 +115,53 @@ describe("Credentials page action", () => {
   });
 });
 
+/**
+ * Settings held four toggles that forgot themselves on reload and a hardcoded
+ * wallet address — "midnight1q…4r8x" — printed while a real session was
+ * available. A control that looks adjustable and changes nothing is the same
+ * untruth as a badge-less fabricated chart, only quieter.
+ */
+describe("Settings", () => {
+  const openSettings = async () => {
+    const user = renderApp();
+    await user.click(screen.getByRole("button", { name: /^Settings/ }));
+    return user;
+  };
+
+  it("prints no invented wallet address", async () => {
+    await openSettings();
+    expect(screen.queryByText(/midnight1q/i)).toBeNull();
+  });
+
+  it("says no wallet is connected rather than showing one that is not", async () => {
+    await openSettings();
+    expect(await screen.findByText(/no wallet connected/i)).toBeInTheDocument();
+  });
+
+  it("offers a theme control that actually changes the theme", async () => {
+    const user = await openSettings();
+    // The topbar has a theme control too; this one is the settings row.
+    const row = (await screen.findByText("Dark mode")).closest(".setting-row");
+    const toggle = within(row as HTMLElement).getByRole("button");
+    const before = document.documentElement.classList.contains("dark");
+    await user.click(toggle);
+    expect(document.documentElement.classList.contains("dark")).toBe(!before);
+  });
+
+  it("offers the Midnight network the app will actually ask for", async () => {
+    await openSettings();
+    const group = await screen.findByRole("group", { name: /midnight network/i });
+    expect(within(group).getAllByRole("button").length).toBeGreaterThan(1);
+  });
+
+  it("states the privacy guarantees as locked rather than as choices", async () => {
+    await openSettings();
+    const consent = await screen.findByRole("button", { name: /Ask before every proof/i });
+    expect(consent).toHaveAttribute("aria-pressed", "true");
+    expect(consent.className).toMatch(/toggle-locked/);
+  });
+});
+
 describe("workspace navigation", () => {
   /**
    * The breadcrumb was hardcoded to "Overview", so every page claimed to be a
