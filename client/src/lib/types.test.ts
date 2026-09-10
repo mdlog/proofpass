@@ -8,6 +8,7 @@ import {
   credentialSummary,
   toDisplayCredential,
   toDisplayRequest,
+  visibleRequests,
   type CredentialView,
   type ProofRequestView,
   type ServerProofRequest,
@@ -196,5 +197,34 @@ describe("credentialSummary", () => {
 
   it("says something for an empty grid rather than returning nothing", () => {
     expect(credentialSummary([]).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Seeded rows exist so a page is not empty before anything is stored. Once real
+ * rows arrive that reason is gone, and keeping them only dilutes the real ones —
+ * a list where four of five entries are fabricated reads as a mock even when it
+ * is not.
+ */
+describe("visibleRequests", () => {
+  const stored = (id: string) => ({ id }) as ProofRequestView;
+  const seeded = (id: string) => ({ id }) as ProofRequestView;
+
+  it("shows only stored requests once any exist", () => {
+    const visible = visibleRequests([stored("s1")], [seeded("d1"), seeded("d2")]);
+    expect(visible.map((r) => r.id)).toEqual(["s1"]);
+  });
+
+  it("falls back to seeded rows when nothing is stored, so the page is not empty", () => {
+    expect(visibleRequests([], [seeded("d1"), seeded("d2")]).map((r) => r.id)).toEqual(["d1", "d2"]);
+  });
+
+  it("keeps every stored request, in the order given", () => {
+    const visible = visibleRequests([stored("s1"), stored("s2")], [seeded("d1")]);
+    expect(visible.map((r) => r.id)).toEqual(["s1", "s2"]);
+  });
+
+  it("shows nothing rather than inventing rows when both are empty", () => {
+    expect(visibleRequests([], [])).toEqual([]);
   });
 });

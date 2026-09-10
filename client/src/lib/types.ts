@@ -170,3 +170,15 @@ export function credentialSummary(credentials: CredentialView[]): string {
   const held = stored === 0 ? "No stored credentials yet" : `${stored} stored credential${stored === 1 ? "" : "s"}`;
   return seeded === 0 ? `${held}.` : `${held} · ${seeded} seeded card${seeded === 1 ? "" : "s"} below, kept so the page reads as populated.`;
 }
+
+/**
+ * Which proof requests to show.
+ *
+ * Seeded rows exist so the page is not empty before anything is stored. Once
+ * real rows arrive that reason is gone, and keeping them beside real ones only
+ * dilutes them — a list where four of five entries are fabricated reads as a
+ * mock even when it is not, whatever the badges say.
+ */
+export function visibleRequests(stored: ProofRequestView[], seeded: ProofRequestView[]): ProofRequestView[] {
+  return stored.length > 0 ? stored : seeded;
+}
